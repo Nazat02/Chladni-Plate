@@ -923,6 +923,15 @@
   // the 2D canvas and driver already use) ----
   const SURF_RES = 84;                 // vertices per side of the graph mesh
   const SURF_HEIGHT = 0.6;             // visual scale from normalized amplitude to world-space height
+  // The height-map graph plots a steady-state amplitude field, which (correctly)
+  // has no time dynamics of its own - unlike the flat/volume modes, there are no
+  // particles drifting or jittering to give the view a sense of life, so it reads
+  // as frozen the moment you stop dragging the camera. SURF_WAKE_FRAMES drives a
+  // brief "rise into resonance" reveal (mesh eases up from flat to true height)
+  // any time the field actually changes or the user asks for a reset - the
+  // volumetric/flat analogue of WAKE_FRAMES/WAKE3_FRAMES re-agitating sand.
+  const SURF_WAKE_FRAMES = 50;
+  let surfWakeCounter = 0;
   const surfIndex = (()=>{
     const idx = [];
     for(let j=0;j<SURF_RES-1;j++){
@@ -1181,6 +1190,11 @@
     const pos = three3.surfGeo.attributes.position;
     const col = three3.surfGeo.attributes.color;
     const rgb = [0,0,0];
+    // ease-out cubic: 0 right when a reveal starts, 1 once it's fully settled -
+    // ramping SURF_HEIGHT itself (not a fake extra animation on top of the real
+    // field) so what's shown is always literally amp(x,y), just rising into view.
+    const revealRaw = surfWakeCounter>0 ? 1-(surfWakeCounter/SURF_WAKE_FRAMES) : 1;
+    const reveal = 1-Math.pow(1-revealRaw,3);
     let k = 0;
     for(let j=0;j<SURF_RES;j++){
       const v = j/(SURF_RES-1);
@@ -1190,7 +1204,7 @@
         // same (x,-z) plate mapping as the volume cloud; height (world Y)
         // comes straight from the field amplitude instead of a particle's
         // own drifted position.
-        pos.setXYZ(k, u-0.5, -0.5+amp*SURF_HEIGHT, -(v-0.5));
+        pos.setXYZ(k, u-0.5, -0.5+amp*SURF_HEIGHT*reveal, -(v-0.5));
         surfaceColor(amp, rgb);
         col.setXYZ(k, rgb[0], rgb[1], rgb[2]);
         k++;
@@ -1256,6 +1270,7 @@
     computeField(); // recomputes both the 2D field and (via the hook inside it) the 3D field
     wakeCounter = WAKE_FRAMES;
     wake3Counter = WAKE3_FRAMES;
+    surfWakeCounter = SURF_WAKE_FRAMES;
   }
 
   let dragging=false, dragMoved=false, lastPX=0, lastPY=0;
@@ -1311,6 +1326,7 @@
       omega3 = sliderToOmega3(slider.value);
       computeField3D();
     } else if(mode==='surface'){
+      surfWakeCounter = SURF_WAKE_FRAMES;
       updateSurfaceMesh();
     }
 
@@ -1410,6 +1426,7 @@
       computeField();
       wakeCounter = WAKE_FRAMES;
       wake3Counter = WAKE3_FRAMES;
+      surfWakeCounter = SURF_WAKE_FRAMES;
       pendingRecompute = false;
     });
   }
@@ -1453,11 +1470,18 @@
       scatterParticles3D();
       wake3Counter = WAKE3_FRAMES;
     } else if(viewMode==='surface'){
-      // no particles to rescatter on a height-map graph - re-center the
-      // orbit camera instead, so the button still does something useful.
+      // There are no particles here, so "rescatter" can't mean the same thing
+      // it does elsewhere - but recentering the camera used to be the ONLY
+      // effect, which meant clicking this button while the camera was already
+      // at its default position (the common case: you just switched into
+      // surface mode and haven't dragged yet) visibly did nothing at all. The
+      // reveal transient below guarantees a real, visible response every time,
+      // the same way scatterParticles()/scatterParticles3D() always visibly
+      // restart something in the other two modes.
       camTheta = Math.PI*0.28; camPhi = Math.PI*0.30; camRadius = 2.6;
       autoRotate = true;
       updateCameraFromSpherical();
+      surfWakeCounter = SURF_WAKE_FRAMES;
     } else {
       scatterParticles();
       hint.style.opacity = '1';
@@ -1495,6 +1519,7 @@
       three3.renderer.render(three3.scene, three3.camera);
     } else if(viewMode==='surface' && three3){
       updateSurfaceMesh();
+      if(surfWakeCounter>0) surfWakeCounter--;
       if(autoRotate){ camTheta += 0.0018; updateCameraFromSpherical(); }
       three3.renderer.render(three3.scene, three3.camera);
     } else {
