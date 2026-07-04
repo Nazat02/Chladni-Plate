@@ -472,12 +472,20 @@
   }
 
   // curated resonances to cycle through - real (m,n) pairs, not decoration.
-  // (1,1) is deliberately NOT first: its only nodal line is the plate's own
-  // outer border, so it has no interior figure at all - sand just drifts
-  // into the corners, which reads as a smudge, not a Chladni pattern. Modes
-  // with an interior grid (like (3,2)/(4,3)) go first so the very first
-  // frame is a recognizable, symmetric flower/rosette figure.
-  const TARGETS = [[3,2],[4,3],[2,2],[1,3],[2,1],[3,4],[1,1]];
+  // (1,1) is excluded here, not just deprioritized: it's the one mode with
+  // NO interior nodal line at all - its entire zero set is the plate's own
+  // border, which is exactly the band EDGE_FLOOR keeps artificially above
+  // SETTLE_EPS (so low modes don't just pile sand into a boring picture-frame).
+  // For every other target that's fine, because they all have genuine interior
+  // nodal lines to settle on instead. (1,1) has none, so `amp` never actually
+  // drops below SETTLE_EPS anywhere on the plate - particles never lock, stay
+  // in perpetual low-level jitter, and drift into the corner-ward gradient
+  // kinks of EDGE_FLOOR's diamond (Math.min) distance metric. Reordering it
+  // out of the first slot only delayed that failure to whenever it next cycled
+  // up; removing it is the actual fix. (It still appears correctly in the
+  // static gallery below, which renders amplitude directly with no particle
+  // settling involved, so the failure mode doesn't apply there.)
+  const TARGETS = [[3,2],[4,3],[2,2],[1,3],[2,1],[3,4]];
   let targetIdx = 0;
   function nextTarget(skipWake){
     const [m,n] = TARGETS[targetIdx % TARGETS.length]; targetIdx++;
