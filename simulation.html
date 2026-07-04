@@ -1,0 +1,1550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Chladni Plate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{
+    --bg: #0a0a0c;
+    --panel: #131417;
+    --panel-line: #232529;
+    --metal-hi: #4a4d52;
+    --metal-lo: #17181b;
+    --sand: #e4dcc4;
+    --amber: #ffab3d;
+    --amber-dim: #7a5321;
+    --ink-dim: #8b8d92;
+    --ink: #e8e8ea;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{
+    margin:0; padding:0; height:100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Space Grotesk', sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  #app{
+    display:flex; flex-direction:column;
+    height:100%; width:100%;
+    align-items:center;
+    padding: env(safe-area-inset-top,14px) 14px calc(env(safe-area-inset-bottom,14px) + 6px) 14px;
+  }
+  header{
+    width:100%; max-width: 640px;
+    display:flex; align-items:baseline; justify-content:space-between;
+    padding: 4px 4px 10px 4px;
+    flex-shrink:0;
+  }
+  header h1{
+    font-size: 15px; font-weight:700; letter-spacing: 0.12em; margin:0;
+    color: var(--ink);
+  }
+  header h1 a{
+    color:inherit; text-decoration:none;
+  }
+  header h1 a:hover, header h1 a:focus-visible{ opacity:0.8; }
+  header h1 span{ color: var(--amber); }
+  header .sub{
+    font-family:'JetBrains Mono', monospace;
+    font-size: 9.5px; color: var(--ink-dim); letter-spacing:0.03em;
+  }
+  #stage{
+    position:relative;
+    flex: 1 1 auto;
+    width:100%; max-width: 640px;
+    min-height: 0; min-width: 0; /* allow shrinking below the plate's intrinsic
+      (height-driven, via aspect-ratio) width — without this, on wide-but-short
+      desktop windows the plate refused to shrink and pushed the side panel
+      past the right edge, causing the panel's rows to overlap each other */
+    display:flex; align-items:center; justify-content:center;
+  }
+  #plateWrap{
+    position:relative;
+    aspect-ratio: 1/1;
+    height: 100%;
+    max-width: 100%;
+    border-radius: 6px;
+    box-shadow:
+      0 0 0 1px #2b2d31,
+      0 20px 60px -20px rgba(0,0,0,0.8),
+      inset 0 0 40px rgba(0,0,0,0.5);
+  }
+  canvas{
+    display:block;
+    width:100%; height:100%;
+    border-radius: 6px;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  canvas.hidden3d{ display:none; }
+  #plate3d{
+    position:absolute; inset:0;
+    border-radius:6px;
+    display:none;
+    touch-action:none;
+    cursor: grab;
+  }
+  #plate3d canvas{ cursor:inherit; }
+  #plate3d.active{ display:block; }
+  #plate3d:active{ cursor: grabbing; }
+  #modeToggle{
+    position:absolute; top:10px; right:10px;
+    display:flex; gap:6px;
+    z-index:6;
+  }
+  #modeToggle button{
+    font-family:'JetBrains Mono', monospace;
+    font-size: 9.5px; letter-spacing:0.1em; font-weight:600;
+    line-height:1; white-space:nowrap;
+    color: var(--ink-dim);
+    background: rgba(19,20,23,0.72);
+    backdrop-filter: blur(4px);
+    border: 1px solid var(--panel-line);
+    border-radius: 20px;
+    padding: 7px 13px;
+    margin:0;
+    cursor:pointer;
+    user-select:none;
+    transition: color 0.15s, border-color 0.15s, box-shadow 0.2s;
+  }
+  #modeToggle button:hover{ color: var(--amber); border-color: var(--amber-dim); }
+  #modeToggle button.active{
+    color: var(--amber); border-color: var(--amber-dim);
+    box-shadow: 0 0 12px rgba(255,171,61,0.18);
+  }
+  #modeToggle button:focus-visible{
+    outline: 1.5px solid var(--amber);
+    outline-offset: 2px;
+  }
+  #orbitHint{
+    position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+    font-family:'JetBrains Mono', monospace;
+    font-size: 9.5px; letter-spacing:0.04em;
+    color: rgba(232,232,234,0.45);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    pointer-events:none;
+    white-space:nowrap;
+    display:none;
+  }
+  #orbitHint.active{ display:block; }
+  .corner{
+    position:absolute; width:9px; height:9px;
+    border: 1.5px solid rgba(255,171,61,0.55);
+  }
+  .c-tl{ top:6px; left:6px; border-right:none; border-bottom:none; }
+  .c-tr{ top:6px; right:6px; border-left:none; border-bottom:none; }
+  .c-bl{ bottom:6px; left:6px; border-right:none; border-top:none; }
+  .c-br{ bottom:6px; right:6px; border-left:none; border-top:none; }
+
+  #readout{
+    position:absolute; top:12px; left:14px;
+    font-family:'JetBrains Mono', monospace;
+    font-size: 10px; line-height:1.5;
+    color: rgba(232,232,234,0.75);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    pointer-events:none;
+  }
+  #readout .lab{ color: var(--amber); opacity:0.85; }
+  #hint{
+    position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+    font-family:'JetBrains Mono', monospace;
+    font-size: 9.5px; letter-spacing:0.04em;
+    color: rgba(232,232,234,0.45);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    pointer-events:none;
+    white-space:nowrap;
+    transition: opacity 0.6s ease;
+  }
+
+  #panel{
+    width:100%; max-width: 640px;
+    flex-shrink:0;
+    padding-top: 12px;
+  }
+  .row{
+    display:flex; align-items:center; gap:12px;
+  }
+  .freqbox{ flex:1; }
+  .lbl-row{
+    display:flex; justify-content:space-between; align-items:baseline;
+    margin-bottom:6px;
+  }
+  .lbl-row label{
+    font-size: 10px; letter-spacing:0.12em; color: var(--ink-dim); font-weight:600;
+  }
+  .lbl-row .val{
+    font-family:'JetBrains Mono', monospace;
+    font-size: 13px; color: var(--amber); font-weight:600;
+    letter-spacing: 0.02em;
+  }
+  .freq-controls{ display:flex; align-items:center; gap:8px; }
+  .step-btn{
+    font-family:'JetBrains Mono', monospace;
+    font-size:13px; font-weight:700; line-height:1;
+    width:20px; height:20px; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    color: var(--ink-dim);
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    cursor:pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .step-btn:hover{ color: var(--amber); border-color: var(--amber-dim); }
+  .step-btn:active{ transform: translateY(1px); }
+  .slider-track{
+    position:relative;
+    height: 34px;
+  }
+  .ticks{
+    position:absolute; left:0; right:0; top:2px; height:8px;
+    pointer-events:none;
+  }
+  .tick{
+    position:absolute; top:0; width:1px; height:6px;
+    background: rgba(139,141,146,0.4);
+  }
+  .tick.hot{ background: var(--amber); height:9px; box-shadow:0 0 4px var(--amber); }
+  input[type=range]{
+    -webkit-appearance:none; appearance:none;
+    position:absolute; top:10px; left:0;
+    width:100%; height:24px;
+    background:transparent;
+    margin:0;
+  }
+  input[type=range]::-webkit-slider-runnable-track{
+    height:3px; background: var(--panel-line); border-radius:2px;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:16px; height:16px; margin-top:-6.5px;
+    border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, #ffd9a0, var(--amber) 60%, #b56a12);
+    box-shadow: 0 0 8px rgba(255,171,61,0.6), 0 1px 3px rgba(0,0,0,0.6);
+    border: 1px solid rgba(0,0,0,0.3);
+    cursor:pointer;
+  }
+  input[type=range]::-moz-range-track{
+    height:3px; background: var(--panel-line); border-radius:2px;
+  }
+  input[type=range]::-moz-range-thumb{
+    width:14px; height:14px; border:none; border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, #ffd9a0, var(--amber) 60%, #b56a12);
+    box-shadow: 0 0 8px rgba(255,171,61,0.6);
+    cursor:pointer;
+  }
+  button{
+    font-family:'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing:0.08em; font-weight:600;
+    color: var(--ink-dim);
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 5px;
+    padding: 9px 13px;
+    cursor:pointer;
+    white-space:nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  button:hover{ color: var(--amber); border-color: var(--amber-dim); }
+  button:active{ transform: translateY(1px); }
+
+  /* ---------- layout wrapper (mobile: plain column, matches old stage+panel stack) ---------- */
+  #layout{
+    position:relative;
+    display:flex; flex-direction:column;
+    width:100%; max-width:640px;
+    flex:1 1 auto; min-height:0;
+  }
+  .specs{ display:none; }
+  .sidebar-block{ display:none; }
+  .panel-title{ display:none; }
+  .panel-toggle{ display:none; }
+
+  /* ---------- desktop ---------- */
+  @media (min-width:880px) and (min-height:540px){
+    body{
+      background:
+        radial-gradient(ellipse 1000px 640px at 50% 4%, rgba(90,93,99,0.09), transparent 62%),
+        var(--bg);
+    }
+    #app{ padding: 32px 44px 36px; }
+    header{ max-width:1180px; padding:4px 4px 20px 4px; align-items:center; }
+    header h1{ font-size:18px; }
+    header .sub{ font-size:11px; }
+    .specs{
+      display:flex; align-items:center; gap:7px;
+      font-family:'JetBrains Mono', monospace;
+      font-size:9.5px; letter-spacing:0.09em; color: var(--ink-dim);
+    }
+    .specs .dot{
+      width:5px; height:5px; border-radius:50%;
+      background: var(--amber); box-shadow:0 0 6px var(--amber);
+    }
+    #layout{
+      max-width:1180px;
+      flex-direction:row;
+      align-items:stretch;
+      gap:44px;
+      transition: gap 0.32s cubic-bezier(.4,0,.2,1);
+    }
+    #layout.sidebar-collapsed{ gap:0; }
+    #stage{ max-width:none; }
+
+    /* ---- collapsible sidebar ---- */
+    /* The panel's flex-basis (not just width) drives its footprint in the row,
+       so that's what needs to animate - transitioning width alone would leave
+       flex-basis pinned at 300px and the box wouldn't actually shrink. #stage
+       is flex:1 1 auto, so it automatically reclaims whatever the panel gives
+       up: no extra rule needed to make the plate's box grow into that space. */
+    .panel-toggle{
+      display:flex; align-items:center; justify-content:center;
+      position:absolute; top:50%; right:300px;
+      transform:translate(50%,-50%);
+      width:22px; height:56px;
+      background: var(--panel);
+      border: 1px solid var(--panel-line);
+      border-radius: 6px;
+      color: var(--ink-dim);
+      font-size:13px; line-height:1;
+      cursor:pointer;
+      z-index:5;
+      transition: right 0.32s cubic-bezier(.4,0,.2,1), color 0.15s, border-color 0.15s;
+    }
+    .panel-toggle:hover{ color: var(--amber); border-color: var(--amber-dim); }
+    .panel-toggle:active{ transform:translate(50%,-50%) scale(0.94); }
+    #layout.sidebar-collapsed .panel-toggle{ right:0; }
+    #panel{
+      overflow:hidden;
+      transition: flex-basis 0.32s cubic-bezier(.4,0,.2,1), opacity 0.22s ease;
+    }
+    #layout.sidebar-collapsed #panel{
+      flex-basis:0; opacity:0; pointer-events:none;
+    }
+    /* With the sidebar tucked away the plate becomes the whole point of the
+       screen, so give it a bit more breathing room too rather than just
+       filling the freed width with the same side padding as before. */
+    #app{ transition: padding 0.28s ease; }
+    header{ transition: padding 0.28s ease; }
+    header .sub{ transition: opacity 0.2s ease; }
+    #app.sidebar-collapsed{ padding: 16px 26px 18px; }
+    #app.sidebar-collapsed header{ max-width:none; padding-bottom:10px; }
+    #app.sidebar-collapsed header .sub{ opacity:0; pointer-events:none; }
+    #app.sidebar-collapsed #layout{ max-width:none; }
+    /* The plate is a square sized by whichever of width/height is tighter -
+       on typical desktop windows that's height (the header + top/bottom
+       padding eat into it), not the sidebar's width. So the sidebar collapse
+       alone was freeing width the plate often didn't need, and "big display"
+       wasn't actually getting bigger, just re-centered in extra empty space.
+       Trimming the header down and tightening #app's vertical padding above
+       gives the plate the dimension it's actually constrained by. */
+    #plateWrap{
+      box-shadow:
+        0 0 0 1px #2b2d31,
+        0 32px 90px -26px rgba(0,0,0,0.85),
+        0 0 130px -42px rgba(255,171,61,0.10),
+        inset 0 0 50px rgba(0,0,0,0.5);
+    }
+    /* On desktop the sidebar has its own full-size telemetry readout, so the
+       tiny on-canvas overlay is now a redundant duplicate sitting on top of
+       the plate - drop it here and let the sidebar be the single source of
+       truth for numbers, keeping the plate itself uncluttered. */
+    #readout{ display:none; }
+    #hint{ font-size:10.5px; }
+    #panel{
+      max-width:none;
+      width:300px; flex:0 0 300px;
+      padding-top:0;
+      display:flex; flex-direction:column;
+      /* Previously: justify-content:center with a single flat gap. On a tall
+         desktop window the plate (height-driven, square) is much taller than
+         the sidebar's actual content, so centering left large, equal, dead
+         gaps above and below the whole stack - it read as unfinished rather
+         than intentional. Distributing the (now card-shaped) sections with
+         space-between instead spreads that same height across the layout on
+         purpose, so the sidebar looks composed at any window height instead
+         of just floating in the middle of empty space. */
+      justify-content:space-between;
+      gap:20px;
+    }
+    #panel .row{
+      flex-direction:column; align-items:stretch; gap:18px;
+    }
+    #panel button{ width:100%; padding:13px; font-size:10.5px; }
+    /* Every sidebar section - driver controls, telemetry, legend - now gets
+       the same card treatment (background + border + generous padding)
+       instead of plain text with a thin top divider. That gives the sidebar
+       actual visual mass to balance the plate, and turns "TELEMETRY" /
+       "GRAIN ENERGY" from labels floating in the dark into a cohesive
+       instrument-panel look. */
+    .panel-card, .sidebar-block{
+      display:block;
+      background: var(--panel);
+      border: 1px solid var(--panel-line);
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .panel-title{
+      display:block;
+      font-size:10px; letter-spacing:0.14em; color:var(--ink-dim);
+      font-weight:600; margin-bottom:14px;
+    }
+    .sidebar-title{
+      font-size:10px; letter-spacing:0.14em; color:var(--ink-dim);
+      font-weight:600; margin-bottom:12px;
+    }
+    .tele-row{
+      display:flex; justify-content:space-between; align-items:baseline;
+      font-family:'JetBrains Mono', monospace; font-size:11.5px;
+      padding:5px 0; border-bottom:1px dashed rgba(35,37,41,0.9);
+    }
+    .tele-row:last-child{ border-bottom:none; }
+    .tele-lab{ color:var(--amber); opacity:0.85; letter-spacing:0.06em; font-size:9.5px; }
+    .tele-val{ color:var(--ink); font-weight:600; }
+    .legend{ display:flex; align-items:center; gap:10px; }
+    .legend .bar{
+      flex:1; height:6px; border-radius:3px;
+      background: linear-gradient(90deg, #e4dcc4, #ffab3d);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
+    }
+    .legend .lab{
+      font-family:'JetBrains Mono', monospace; font-size:8.5px;
+      color:var(--ink-dim); letter-spacing:0.05em; white-space:nowrap;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1><a href="index.html">CHLADNI<span>·</span>PLATE</a></h1>
+    <div class="specs"><span class="dot"></span>9,000 GRAINS &middot; 18&times;18 MODES</div>
+    <div class="sub">D&#8711;&#8308;w + &rho;h&#8202;w&#776; = f &middot; forced modal response</div>
+  </header>
+
+  <div id="layout">
+    <div id="stage">
+      <div id="plateWrap">
+        <canvas id="plate"></canvas>
+        <div id="plate3d"></div>
+        <div class="corner c-tl"></div>
+        <div class="corner c-tr"></div>
+        <div class="corner c-bl"></div>
+        <div class="corner c-br"></div>
+        <div id="readout"></div>
+        <div id="hint">click / tap the plate to move the driver</div>
+        <div id="orbitHint">drag to orbit &middot; tap floor to move source</div>
+        <div id="modeToggle" role="group" aria-label="View mode">
+          <button type="button" id="mode3DBtn" aria-pressed="false" title="Toggle 3D volumetric view">3D</button>
+          <button type="button" id="modeSurfBtn" aria-pressed="false" title="Toggle 3D surface graph">SURF</button>
+        </div>
+      </div>
+    </div>
+
+    <button type="button" id="panelToggle" class="panel-toggle" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
+      <span id="panelToggleIcon">&#8250;</span>
+    </button>
+
+    <div id="panel">
+      <div class="panel-card">
+        <div class="panel-title">DRIVER CONTROL</div>
+        <div class="row">
+        <div class="freqbox">
+          <div class="lbl-row">
+            <label>DRIVE FREQUENCY</label>
+            <div class="freq-controls">
+              <button type="button" class="step-btn" id="freqDown" aria-label="Decrease frequency">−</button>
+              <span class="val" id="freqVal">—</span>
+              <button type="button" class="step-btn" id="freqUp" aria-label="Increase frequency">+</button>
+            </div>
+          </div>
+          <div class="slider-track">
+            <div class="ticks" id="ticks"></div>
+            <input type="range" id="freqSlider" min="0" max="1000" step="1" value="260">
+          </div>
+        </div>
+        <button id="resetBtn">RESCATTER</button>
+        </div>
+      </div>
+
+      <div class="sidebar-block">
+        <div class="sidebar-title">TELEMETRY</div>
+        <div class="tele-row"><span class="tele-lab">NEAR MODE</span><span class="tele-val" id="teleMode">(1, 1)</span></div>
+        <div class="tele-row"><span class="tele-lab">Ω DRIVE</span><span class="tele-val" id="teleOmega">130.0</span></div>
+        <div class="tele-row"><span class="tele-lab">ζ DAMPING</span><span class="tele-val" id="teleZeta">0.018</span></div>
+        <div class="tele-row"><span class="tele-lab">DRIVE X,Y</span><span class="tele-val" id="teleDrive">0.50, 0.50</span></div>
+      </div>
+
+      <div class="sidebar-block">
+        <div class="sidebar-title">GRAIN ENERGY</div>
+        <div class="legend">
+          <span class="lab">LOW</span>
+          <div class="bar"></div>
+          <span class="lab">HIGH AMP</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- config ----------
+  // Physics: thin isotropic Kirchhoff-Love plate, simply-supported square, unit side.
+  // Governing PDE:  D * grad^4(w) + rho*h * w_tt = f(x,y,t)
+  // Eigenfunctions: phi_mn = sin(m*pi*x) sin(n*pi*y)
+  // Because grad^2 phi_mn = -pi^2(m^2+n^2) phi_mn, the biharmonic operator gives
+  // grad^4 phi_mn = pi^4 (m^2+n^2)^2 phi_mn  ->  natural frequency  w_mn ∝ (m^2+n^2)
+  // (this is the key difference from a membrane/wave equation, where w_mn ∝ sqrt(m^2+n^2)).
+  // Each mode then behaves as an independent damped harmonic oscillator driven at
+  // frequency w by a point force at (x0,y0):
+  //     q_mn(w) = phi_mn(x0,y0) / ( w_mn^2 - w^2 + i*2*zeta*w_mn*w )
+  // which is the standard single-DOF forced-vibration transfer function.
+  const M = 18;                 // mode count per axis
+  const GRID = 108;             // field grid resolution
+  const N_PARTICLES = 9000;
+  // The 3D field lives in a *volume*, not a plane - the same particle count
+  // spread over a cube looks vastly sparser than it does over a flat plate
+  // (grains dilute with the cube of the size instead of the square), which is
+  // why the volumetric cloud read as an almost-empty scatter of dust. Give it
+  // its own, much larger budget so the nodal surfaces actually read as surfaces.
+  const N_PARTICLES_3D = 42000;
+  const ZETA = 0.018;            // modal damping ratio (~1.8%, typical lightly-damped sheet metal)
+  const OMEGA_LIN_MAX = 2*M*M;   // max natural frequency w_mn = m^2+n^2 reachable by the slider
+                                  // (highest mode is m=n=M, so w_MM = 2M^2 - previously this had
+                                  // a "+20" pad, which left the top ~6.5% of the slider with no
+                                  // resonance to reach: dead travel with no ticks and nothing new happening)
+
+  // ---------- canvas setup ----------
+  const canvas = document.getElementById('plate');
+  const ctx = canvas.getContext('2d', { alpha:false });
+  const wrap = document.getElementById('plateWrap');
+  const stageEl = document.getElementById('stage');
+  let cssSize = 0, dpr = Math.min(window.devicePixelRatio||1, 2.5);
+
+  function resize(){
+    // #plateWrap's CSS `aspect-ratio:1/1` only resolves an *auto* dimension -
+    // once height:100% (from the flex parent) AND max-width:100% both land on
+    // definite values, the browser has nothing left to auto-size, so aspect-ratio
+    // is silently skipped and the box can end up a non-square rectangle (seen in
+    // some viewport ratios, esp. wide-but-short or narrow-but-tall windows). The
+    // 2D canvas used to hide this by force-sizing itself to a square inside that
+    // rectangle, but the 3D canvas has no such override and would render into
+    // the full (distorted) box - this was the root cause of the 3D view looking
+    // tiny/off-center/warped. Fix it at the source: compute the true square
+    // size from the stage's actual available box and pin the wrap to it directly.
+    cssSize = Math.max(1, Math.floor(Math.min(stageEl.clientWidth, stageEl.clientHeight)));
+    wrap.style.width = cssSize+'px';
+    wrap.style.height = cssSize+'px';
+    canvas.width = Math.round(cssSize*dpr);
+    canvas.height = Math.round(cssSize*dpr);
+    canvas.style.width = cssSize+'px';
+    canvas.style.height = cssSize+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    buildPlateSprite();
+    if(typeof buildTicks === 'function') buildTicks(); // tick positions are now in px, so rebuild on layout change
+    if(typeof resizeThree === 'function') resizeThree(); // keep the WebGL canvas in lockstep with the plate's square box
+  }
+
+  // ---------- offscreen plate background (brushed metal) ----------
+  let plateSprite = null;
+  function buildPlateSprite(){
+    const s = document.createElement('canvas');
+    s.width = canvas.width; s.height = canvas.height;
+    const sc = s.getContext('2d');
+    sc.setTransform(dpr,0,0,dpr,0,0);
+    const g = sc.createRadialGradient(cssSize*0.5,cssSize*0.42,cssSize*0.05, cssSize*0.5,cssSize*0.5,cssSize*0.75);
+    g.addColorStop(0, '#4c4f54');
+    g.addColorStop(0.45, '#303237');
+    g.addColorStop(1, '#131417');
+    sc.fillStyle = g;
+    sc.fillRect(0,0,cssSize,cssSize);
+    // brushed streaks
+    sc.globalAlpha = 0.05;
+    sc.strokeStyle = '#ffffff';
+    for(let i=0;i<140;i++){
+      const y = Math.random()*cssSize;
+      sc.lineWidth = Math.random()*0.8;
+      sc.beginPath();
+      sc.moveTo(0,y);
+      sc.lineTo(cssSize, y + (Math.random()-0.5)*6);
+      sc.stroke();
+    }
+    sc.globalAlpha = 1;
+    // vignette
+    const vg = sc.createRadialGradient(cssSize*0.5,cssSize*0.5,cssSize*0.35, cssSize*0.5,cssSize*0.5,cssSize*0.72);
+    vg.addColorStop(0,'rgba(0,0,0,0)');
+    vg.addColorStop(1,'rgba(0,0,0,0.55)');
+    sc.fillStyle = vg;
+    sc.fillRect(0,0,cssSize,cssSize);
+    plateSprite = s;
+  }
+
+  window.addEventListener('resize', resize);
+
+  // ---------- precomputed mode tables ----------
+  const sinX = new Float32Array(M*GRID); // [m*GRID+ix] m=1..M -> idx m-1
+  const sinY = new Float32Array(M*GRID);
+  // sinX and sinY hold identical values today because the plate is a unit square
+  // sampled at the same GRID resolution on both axes, so sin(m*pi*x) at a given
+  // normalized coordinate equals sin(m*pi*y) at that same coordinate. They're kept
+  // as two arrays (rather than one array reused for both) so that if the plate
+  // ever becomes non-square, or x/y get different resolutions, only this loop needs
+  // to change to sample each axis's own coordinate - nothing downstream assumes
+  // sinX and sinY are the same array.
+  for(let m=1;m<=M;m++){
+    for(let i=0;i<GRID;i++){
+      const coord = (i+0.5)/GRID;
+      const val = Math.sin(m*Math.PI*coord);
+      sinX[(m-1)*GRID+i] = val;
+      sinY[(m-1)*GRID+i] = val;
+    }
+  }
+  const weightRe = new Float32Array(M*M);
+  const weightIm = new Float32Array(M*M);
+  const field = new Float32Array(GRID*GRID);
+  const gradXArr = new Float32Array(GRID*GRID);
+  const gradYArr = new Float32Array(GRID*GRID);
+
+  let driveX = 0.5, driveY = 0.5, omega = 130;
+  let dominantMode = [1,1];
+
+  // D4 orbit of a point (x0,y0) under the square's full symmetry group
+  // (identity, 90/180/270 rotation, 2 axis reflections, 2 diagonal reflections).
+  // Used to symmetrize the excitation - see computeField() below.
+  function d4Orbit(x0,y0, outX, outY){
+    outX[0]=x0;    outY[0]=y0;          // e
+    outX[1]=y0;    outY[1]=1-x0;        // r90
+    outX[2]=1-x0;  outY[2]=1-y0;        // r180
+    outX[3]=1-y0;  outY[3]=x0;          // r270
+    outX[4]=y0;    outY[4]=x0;          // reflect diagonal
+    outX[5]=1-x0;  outY[5]=y0;          // reflect vertical axis
+    outX[6]=1-y0;  outY[6]=1-x0;        // reflect anti-diagonal
+    outX[7]=x0;    outY[7]=1-y0;        // reflect horizontal axis
+  }
+  const orbX = new Float64Array(8), orbY = new Float64Array(8);
+
+  function computeField(){
+    // weights from drive point.
+    // omega (the slider-derived value) is the drive frequency in the SAME linear
+    // units as w_mn = (m^2+n^2), so the resonance condition w_mn == omega is exact.
+    //
+    // SYMMETRY: a single point force at an arbitrary (driveX,driveY) has no
+    // particular symmetry, so its raw modal response is generically lopsided -
+    // real Chladni figures only look "clean" because the plate is excited in a
+    // way that respects its own boundary symmetry. Rather than fake that in the
+    // rendering, we sum each mode's excitation phi0 over the drive point's full
+    // 8-point D4 orbit (identity + 90/180/270 rotations + 4 reflections). That's
+    // physically equivalent to 8 synchronized point drivers placed symmetrically
+    // around the plate, and it guarantees q_mn = q_nm for every mode pair -
+    // exactly the condition for w(x,y) = sum q_mn sin(m*pi*x) sin(n*pi*y) to be
+    // invariant under the square's full symmetry group (mirrors + diagonals).
+    d4Orbit(driveX, driveY, orbX, orbY);
+    let bestScore = -1;
+    for(let m=1;m<=M;m++){
+      for(let n=1;n<=M;n++){
+        let phi0 = 0;
+        for(let k=0;k<8;k++){
+          phi0 += Math.sin(m*Math.PI*orbX[k]) * Math.sin(n*Math.PI*orbY[k]);
+        }
+        const wmn = m*m+n*n;              // natural frequency (linear, correct plate scaling)
+        const wmn2 = wmn*wmn;             // natural frequency squared, as used in the PDE
+        const dre = wmn2 - omega*omega;                 // (w_mn^2 - w^2)
+        const dim = -2*ZETA*wmn*omega;                   // -2*zeta*w_mn*w  (viscous modal damping)
+        const mag2 = dre*dre+dim*dim;
+        const idx = (m-1)*M+(n-1);
+        weightRe[idx] = (phi0*dre)/mag2;
+        weightIm[idx] = (phi0*-dim)/mag2;
+        const score = Math.abs(phi0) / (Math.abs(wmn-omega)+0.6);
+        if(score>bestScore){ bestScore=score; dominantMode=[m,n]; }
+      }
+    }
+    let maxAmp = 1e-6;
+    for(let iy=0; iy<GRID; iy++){
+      for(let ix=0; ix<GRID; ix++){
+        let re=0, im=0;
+        for(let m=1;m<=M;m++){
+          const sx = sinX[(m-1)*GRID+ix];
+          if(sx===0) continue;
+          const base = (m-1)*M;
+          for(let n=1;n<=M;n++){
+            const sy = sinY[(n-1)*GRID+iy];
+            const w = sx*sy;
+            const idx = base+(n-1);
+            re += w*weightRe[idx];
+            im += w*weightIm[idx];
+          }
+        }
+        const amp = Math.sqrt(re*re+im*im);
+        field[iy*GRID+ix] = amp;
+        if(amp>maxAmp) maxAmp = amp;
+      }
+    }
+    // normalize
+    for(let i=0;i<GRID*GRID;i++) field[i] /= maxAmp;
+    if(typeof viewMode !== 'undefined' && viewMode==='volume') computeField3D();
+    // gradient (central differences)
+    for(let iy=0; iy<GRID; iy++){
+      for(let ix=0; ix<GRID; ix++){
+        const xm = ix>0? field[iy*GRID+ix-1] : field[iy*GRID+ix];
+        const xp = ix<GRID-1? field[iy*GRID+ix+1] : field[iy*GRID+ix];
+        const ym = iy>0? field[(iy-1)*GRID+ix] : field[iy*GRID+ix];
+        const yp = iy<GRID-1? field[(iy+1)*GRID+ix] : field[iy*GRID+ix];
+        gradXArr[iy*GRID+ix] = (xp-xm)*0.5*GRID;
+        gradYArr[iy*GRID+ix] = (yp-ym)*0.5*GRID;
+      }
+    }
+    updateReadout();
+  }
+
+  function sampleBilinear(arr, x, y){
+    const gx = Math.min(Math.max(x,0),0.9999)*(GRID-1);
+    const gy = Math.min(Math.max(y,0),0.9999)*(GRID-1);
+    const ix = gx|0, iy = gy|0;
+    const fx = gx-ix, fy = gy-iy;
+    const ix1 = Math.min(ix+1,GRID-1), iy1 = Math.min(iy+1,GRID-1);
+    const a = arr[iy*GRID+ix], b = arr[iy*GRID+ix1];
+    const c = arr[iy1*GRID+ix], d = arr[iy1*GRID+ix1];
+    return (a*(1-fx)+b*fx)*(1-fy) + (c*(1-fx)+d*fx)*fy;
+  }
+
+  // ---------- particles ----------
+  const px = new Float32Array(N_PARTICLES);
+  const py = new Float32Array(N_PARTICLES);
+  const vx = new Float32Array(N_PARTICLES);
+  const vy = new Float32Array(N_PARTICLES);
+  const pamp = new Float32Array(N_PARTICLES);
+
+  function scatterParticles(){
+    for(let i=0;i<N_PARTICLES;i++){
+      px[i] = 0.03 + Math.random()*0.94;
+      py[i] = 0.03 + Math.random()*0.94;
+      vx[i] = 0; vy[i] = 0; pamp[i]=0;
+    }
+  }
+  scatterParticles();
+
+  // Sand transport model: this is the standard *phenomenological* explanation used
+  // for real Chladni figures (grains are agitated in proportion to local vibration
+  // amplitude and net-migrate down the amplitude gradient toward the still nodal
+  // lines). It is not a first-principles granular/DEM simulation - the exact
+  // microscopic transport mechanism for vibrated grains is still an active research
+  // topic - but gradient descent + amplitude-scaled noise reproduces the correct
+  // qualitative and geometric result: grains collect exactly on the zero set of
+  // the modal field, which is the real definition of a Chladni nodal line.
+  const DRIFT = 0.017;
+  const JITTER = 0.030;
+  const FRICTION = 0.90;
+  const SETTLE_EPS = 0.010;   // only the true nodal band falls below this (normalized field)
+
+  // The plate boundary (x or y -> 0 or 1) is a node of *every* mode shape
+  // sin(m*pi*x)sin(n*pi*y), not just whichever one currently pushed a grain
+  // there. Low frequencies in particular are a single broad hump with no
+  // interior nodal lines, so nearly all sand drifts out to the rim - and the
+  // hard velocity-kill below then freezes it there permanently, because
+  // amp stays under SETTLE_EPS at the edge for any frequency you dial in
+  // afterward. Real Chladni sand doesn't have this problem because retuning
+  // the driving frequency re-agitates the whole plate, including grains
+  // sitting at the rim. WAKE_FRAMES/WAKE_NOISE reproduce that: a frequency
+  // change injects a short burst of amplitude-independent jitter and
+  // suspends the hard settle-kill, so parked grains get shaken loose and can
+  // migrate to wherever the new field's actual nodal lines are before
+  // settling again.
+  const WAKE_FRAMES = 75;     // ~1.2s at 60fps
+  const WAKE_NOISE = 0.012;   // constant kick, NOT scaled by local amplitude
+  let wakeCounter = 0;
+
+  function stepParticles(){
+    for(let i=0;i<N_PARTICLES;i++){
+      const x = px[i], y = py[i];
+      const amp = sampleBilinear(field, x, y);
+      pamp[i] = amp;
+      const gx = sampleBilinear(gradXArr, x, y);
+      const gy = sampleBilinear(gradYArr, x, y);
+
+      // Gradient-descent drift toward lower amplitude (the node) plus noise that
+      // scales with local amplitude. Both terms vanish naturally as amp -> 0, so
+      // particles glide to a genuine stop exactly on the nodal line - no
+      // artificial "freeze" cutoff needed, which previously trapped particles
+      // wherever they happened to be instead of letting them finish converging.
+      let nvx = vx[i]*FRICTION - gx*DRIFT + (Math.random()-0.5)*JITTER*amp;
+      let nvy = vy[i]*FRICTION - gy*DRIFT + (Math.random()-0.5)*JITTER*amp;
+
+      if(wakeCounter>0){
+        // Re-agitation burst: constant-magnitude kick so grains sitting at
+        // near-zero amplitude (e.g. the boundary) still get shaken, since a
+        // jitter term scaled by amp would stay ~0 for them and never help.
+        nvx += (Math.random()-0.5)*WAKE_NOISE;
+        nvy += (Math.random()-0.5)*WAKE_NOISE;
+      } else if(amp<SETTLE_EPS){
+        // Once truly on the nodal band (not just "somewhere low"), kill residual
+        // velocity hard so the grain locks - this is what keeps the figure crisp
+        // and stationary instead of perpetually trembling near the line.
+        nvx *= 0.18; nvy *= 0.18;
+      }
+
+      // safety clamp so a steep local gradient can't cause a runaway velocity
+      const sp = Math.hypot(nvx,nvy), maxSp = 0.05;
+      if(sp>maxSp){ nvx = nvx/sp*maxSp; nvy = nvy/sp*maxSp; }
+
+      vx[i]=nvx; vy[i]=nvy;
+      let nx = x+nvx, ny = y+nvy;
+      if(nx<0.01){ nx=0.01; vx[i]*=-0.3; }
+      if(nx>0.99){ nx=0.99; vx[i]*=-0.3; }
+      if(ny<0.01){ ny=0.01; vy[i]*=-0.3; }
+      if(ny>0.99){ ny=0.99; vy[i]*=-0.3; }
+      px[i]=nx; py[i]=ny;
+    }
+  }
+
+  // ---------- rendering ----------
+  const sandRGB = [228,220,196];
+  const amberRGB = [255,171,61];
+
+  function draw(){
+    ctx.drawImage(plateSprite, 0, 0, cssSize, cssSize);
+
+    // driver marker(s) - draw all 8 points of the D4 orbit so the symmetric
+    // excitation (see computeField) is visible, not just the tapped point.
+    const pulse = 3 + 2*Math.abs(Math.sin(Date.now()*0.004));
+    d4Orbit(driveX, driveY, orbX, orbY);
+    for(let k=0;k<8;k++){
+      const dcx = orbX[k]*cssSize, dcy = orbY[k]*cssSize;
+      const primary = k===0;
+      ctx.beginPath();
+      ctx.arc(dcx, dcy, (primary?5:3.4)+pulse*(primary?1:0.55), 0, Math.PI*2);
+      ctx.strokeStyle = primary ? 'rgba(255,171,61,0.5)' : 'rgba(255,171,61,0.22)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(dcx, dcy, primary?2.2:1.4, 0, Math.PI*2);
+      ctx.fillStyle = primary ? 'rgba(255,171,61,0.85)' : 'rgba(255,171,61,0.45)';
+      ctx.fill();
+    }
+
+    ctx.globalCompositeOperation = 'lighter';
+    for(let i=0;i<N_PARTICLES;i++){
+      const a = pamp[i];
+      const t = Math.min(a*2.2, 1);
+      const r = sandRGB[0]+(amberRGB[0]-sandRGB[0])*t;
+      const g = sandRGB[1]+(amberRGB[1]-sandRGB[1])*t;
+      const b = sandRGB[2]+(amberRGB[2]-sandRGB[2])*t;
+      const alpha = 0.28 + 0.55*(1-t*0.55);
+      const x = px[i]*cssSize, y = py[i]*cssSize;
+
+      if(a>0.35){
+        // shimmer glow for energetic grains
+        const glowA = Math.min((a-0.35)*0.9,0.35);
+        ctx.beginPath();
+        ctx.arc(x,y, 3.4+t*2.2, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(255,171,61,${glowA})`;
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(x, y, 0.95+t*0.5, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${alpha})`;
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // ---------- 3D view (WebGL / true volumetric grain cloud) ----------
+  // This is NOT the 2D plate field redrawn in perspective. It's an independent
+  // 3D standing-wave field over a cube - eigenmodes sin(l*pi*x)sin(m*pi*y)sin(n*pi*z)
+  // forced by a point source, same forced-oscillator math as the 2D plate but one
+  // dimension up - so the "nodal lines" become nodal *surfaces* inside the volume.
+  // Grains drift in full 3D (not just x,y) down the amplitude gradient and settle
+  // on those nodal sheets, producing an actual volumetric cloud of grains shaped
+  // by the resonance, not a flat plate viewed at an angle.
+  // viewMode: 'flat' (2D canvas sand), 'volume' (volumetric cube cloud below),
+  // or 'surface' (3D height-map graph of the same 2D field, added alongside).
+  let viewMode = 'flat';
+  let three3 = null; // lazily created: {renderer, scene, camera, points, pgeo, floor, surfMesh, surfGeo, wireMesh}
+  const plate3dEl = document.getElementById('plate3d');
+  const mode3DBtn = document.getElementById('mode3DBtn');
+  const modeSurfBtn = document.getElementById('modeSurfBtn');
+  const orbitHint = document.getElementById('orbitHint');
+
+  function makeGrainSprite(){
+    // soft round sprite so grains read as smooth dust rather than hard square
+    // points - this is what gives the volumetric cloud its "smooth grain" look.
+    const s = 64;
+    const c = document.createElement('canvas');
+    c.width = c.height = s;
+    const cx = c.getContext('2d');
+    const g = cx.createRadialGradient(s/2,s/2,0, s/2,s/2,s/2);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.55)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    cx.fillStyle = g;
+    cx.fillRect(0,0,s,s);
+    return new THREE.CanvasTexture(c);
+  }
+
+  function ampColor(amp, out){
+    // Same sand -> amber hue ramp as the 2D grain renderer, but the 2D canvas
+    // also gets contrast for free from alpha compositing (settled grains drawn
+    // more opaque, energetic ones as a separate translucent glow on top).
+    // THREE.PointsMaterial vertex colors can't vary per-point alpha, so without
+    // extra help every grain - settled or still drifting - came out equally
+    // bright under additive blending and the nodal surfaces never stood out
+    // from the diffuse haze around them. Fold that same "settled = brighter"
+    // contrast into the RGB intensity itself instead: grains actually on the
+    // node get full brightness, still-moving grains are pushed toward faint
+    // background dust, so the nodal surfaces read clearly against the cloud.
+    const t = Math.min(amp*2.2, 1);
+    const intensity = 0.22 + 0.78*Math.pow(1-t, 1.6);
+    out[0] = (sandRGB[0]+(amberRGB[0]-sandRGB[0])*t)/255*intensity;
+    out[1] = (sandRGB[1]+(amberRGB[1]-sandRGB[1])*t)/255*intensity;
+    out[2] = (sandRGB[2]+(amberRGB[2]-sandRGB[2])*t)/255*intensity;
+  }
+
+  function surfaceColor(amp, out){
+    // Same sand -> amber ramp as ampColor(), but without the "settled = brighter"
+    // intensity trick that only makes sense for individually-lit particle dust.
+    // A continuous shaded mesh already gets its highs/lows from real lighting on
+    // the surface's slope, so peaks (antinodes) read amber and the flat nodal
+    // troughs read sand-colored at full, even brightness.
+    const t = Math.min(amp*2.2, 1);
+    out[0] = (sandRGB[0]+(amberRGB[0]-sandRGB[0])*t)/255;
+    out[1] = (sandRGB[1]+(amberRGB[1]-sandRGB[1])*t)/255;
+    out[2] = (sandRGB[2]+(amberRGB[2]-sandRGB[2])*t)/255;
+  }
+
+  // ---- 3D surface graph (height-map mesh of the existing 2D field, no new
+  // physics - just plots amp(x,y) as height over the same plate coordinates
+  // the 2D canvas and driver already use) ----
+  const SURF_RES = 84;                 // vertices per side of the graph mesh
+  const SURF_HEIGHT = 0.6;             // visual scale from normalized amplitude to world-space height
+  const surfIndex = (()=>{
+    const idx = [];
+    for(let j=0;j<SURF_RES-1;j++){
+      for(let i=0;i<SURF_RES-1;i++){
+        const a = j*SURF_RES+i, b = a+1, c = a+SURF_RES, d = c+1;
+        idx.push(a,c,b, b,c,d);
+      }
+    }
+    return new Uint32Array(idx);
+  })();
+
+  // ---- 3D modal field (volumetric analogue of computeField/M/OMEGA_LIN_MAX) ----
+  const L3 = 8, M3 = 8, N3 = 8;         // mode count per axis (kept modest - l*m*n combos grow as a cube)
+  const GRID3 = 28;                      // field grid resolution per axis
+  const ZETA3 = 0.04;                    // a bit more damping than the plate so nodal sheets stay legible at this coarser grid
+  const OMEGA3_MAX = 3*L3*L3;            // highest reachable w_lmn = l^2+m^2+n^2 at l=m=n=L3
+  let omega3 = 0;
+  function sliderToOmega3(v){ return (v/1000)*OMEGA3_MAX; }
+
+  const sinX3 = new Float32Array(L3*GRID3);
+  const sinY3 = new Float32Array(M3*GRID3);
+  const sinZ3 = new Float32Array(N3*GRID3);
+  for(let l=1;l<=L3;l++) for(let i=0;i<GRID3;i++){ sinX3[(l-1)*GRID3+i] = Math.sin(l*Math.PI*(i+0.5)/GRID3); }
+  for(let m=1;m<=M3;m++) for(let i=0;i<GRID3;i++){ sinY3[(m-1)*GRID3+i] = Math.sin(m*Math.PI*(i+0.5)/GRID3); }
+  for(let n=1;n<=N3;n++) for(let i=0;i<GRID3;i++){ sinZ3[(n-1)*GRID3+i] = Math.sin(n*Math.PI*(i+0.5)/GRID3); }
+
+  const weight3Re = new Float32Array(L3*M3*N3);
+  const weight3Im = new Float32Array(L3*M3*N3);
+  const field3 = new Float32Array(GRID3*GRID3*GRID3);
+  const gx3arr = new Float32Array(GRID3*GRID3*GRID3);
+  const gy3arr = new Float32Array(GRID3*GRID3*GRID3);
+  const gz3arr = new Float32Array(GRID3*GRID3*GRID3);
+
+  // symmetrize the point drive over the cube's 8 mirror-reflections through its
+  // center (one bit per axis) - the volumetric analogue of the plate's d4Orbit.
+  const orb3X = new Float64Array(8), orb3Y = new Float64Array(8), orb3Z = new Float64Array(8);
+  function cubeOrbit(x0,y0,z0){
+    let k=0;
+    for(let sx=0; sx<2; sx++) for(let sy=0; sy<2; sy++) for(let sz=0; sz<2; sz++){
+      orb3X[k] = sx? 1-x0 : x0;
+      orb3Y[k] = sy? 1-y0 : y0;
+      orb3Z[k] = sz? 1-z0 : z0;
+      k++;
+    }
+  }
+
+  function computeField3D(){
+    // drive point re-uses the same (driveX,driveY) the 2D plate uses, held at
+    // the cube's mid-height (z=0.5) - tapping the floor in 3D mode moves it.
+    cubeOrbit(driveX, driveY, 0.5);
+    for(let l=1;l<=L3;l++){
+      for(let m=1;m<=M3;m++){
+        for(let n=1;n<=N3;n++){
+          let phi0 = 0;
+          for(let k=0;k<8;k++){
+            phi0 += Math.sin(l*Math.PI*orb3X[k]) * Math.sin(m*Math.PI*orb3Y[k]) * Math.sin(n*Math.PI*orb3Z[k]);
+          }
+          const wlmn = l*l+m*m+n*n;
+          const wlmn2 = wlmn*wlmn;
+          const dre = wlmn2 - omega3*omega3;
+          const dim = -2*ZETA3*wlmn*omega3;
+          const mag2 = dre*dre+dim*dim;
+          const idx = ((l-1)*M3+(m-1))*N3+(n-1);
+          weight3Re[idx] = (phi0*dre)/mag2;
+          weight3Im[idx] = (phi0*-dim)/mag2;
+        }
+      }
+    }
+    let maxAmp = 1e-6;
+    for(let iz=0; iz<GRID3; iz++){
+      for(let iy=0; iy<GRID3; iy++){
+        for(let ix=0; ix<GRID3; ix++){
+          let re=0, im=0;
+          for(let l=1;l<=L3;l++){
+            const sx = sinX3[(l-1)*GRID3+ix];
+            if(sx===0) continue;
+            for(let m=1;m<=M3;m++){
+              const sxy = sx*sinY3[(m-1)*GRID3+iy];
+              const base = ((l-1)*M3+(m-1))*N3;
+              for(let n=1;n<=N3;n++){
+                const w = sxy*sinZ3[(n-1)*GRID3+iz];
+                re += w*weight3Re[base+(n-1)];
+                im += w*weight3Im[base+(n-1)];
+              }
+            }
+          }
+          const amp = Math.sqrt(re*re+im*im);
+          const idx = (iz*GRID3+iy)*GRID3+ix;
+          field3[idx] = amp;
+          if(amp>maxAmp) maxAmp = amp;
+        }
+      }
+    }
+    for(let i=0;i<field3.length;i++) field3[i] /= maxAmp;
+    const G2 = GRID3*GRID3;
+    for(let iz=0; iz<GRID3; iz++){
+      for(let iy=0; iy<GRID3; iy++){
+        for(let ix=0; ix<GRID3; ix++){
+          const idx = iz*G2+iy*GRID3+ix;
+          const xm = ix>0? field3[idx-1] : field3[idx];
+          const xp = ix<GRID3-1? field3[idx+1] : field3[idx];
+          const ym = iy>0? field3[idx-GRID3] : field3[idx];
+          const yp = iy<GRID3-1? field3[idx+GRID3] : field3[idx];
+          const zm = iz>0? field3[idx-G2] : field3[idx];
+          const zp = iz<GRID3-1? field3[idx+G2] : field3[idx];
+          gx3arr[idx] = (xp-xm)*0.5*GRID3;
+          gy3arr[idx] = (yp-ym)*0.5*GRID3;
+          gz3arr[idx] = (zp-zm)*0.5*GRID3;
+        }
+      }
+    }
+  }
+
+  function sampleTrilinear(arr, x, y, z){
+    const G2 = GRID3*GRID3;
+    const gx = Math.min(Math.max(x,0),0.9999)*(GRID3-1);
+    const gy = Math.min(Math.max(y,0),0.9999)*(GRID3-1);
+    const gz = Math.min(Math.max(z,0),0.9999)*(GRID3-1);
+    const ix=gx|0, iy=gy|0, iz=gz|0;
+    const fx=gx-ix, fy=gy-iy, fz=gz-iz;
+    const ix1=Math.min(ix+1,GRID3-1), iy1=Math.min(iy+1,GRID3-1), iz1=Math.min(iz+1,GRID3-1);
+    const c000=arr[iz*G2+iy*GRID3+ix],   c100=arr[iz*G2+iy*GRID3+ix1];
+    const c010=arr[iz*G2+iy1*GRID3+ix],  c110=arr[iz*G2+iy1*GRID3+ix1];
+    const c001=arr[iz1*G2+iy*GRID3+ix],  c101=arr[iz1*G2+iy*GRID3+ix1];
+    const c011=arr[iz1*G2+iy1*GRID3+ix], c111=arr[iz1*G2+iy1*GRID3+ix1];
+    const c00=c000*(1-fx)+c100*fx, c10=c010*(1-fx)+c110*fx;
+    const c01=c001*(1-fx)+c101*fx, c11=c011*(1-fx)+c111*fx;
+    return (c00*(1-fy)+c10*fy)*(1-fz) + (c01*(1-fy)+c11*fy)*fz;
+  }
+
+  // ---- volumetric grain particles (separate set from the 2D sand, since they
+  // migrate in full x/y/z rather than a flat plane) ----
+  const px3 = new Float32Array(N_PARTICLES_3D), py3 = new Float32Array(N_PARTICLES_3D), pz3 = new Float32Array(N_PARTICLES_3D);
+  const vx3 = new Float32Array(N_PARTICLES_3D), vy3 = new Float32Array(N_PARTICLES_3D), vz3 = new Float32Array(N_PARTICLES_3D);
+  const pamp3 = new Float32Array(N_PARTICLES_3D);
+  let particles3Ready = false;
+  function scatterParticles3D(){
+    for(let i=0;i<N_PARTICLES_3D;i++){
+      px3[i] = 0.05+Math.random()*0.9;
+      py3[i] = 0.05+Math.random()*0.9;
+      pz3[i] = 0.05+Math.random()*0.9;
+      vx3[i]=0; vy3[i]=0; vz3[i]=0; pamp3[i]=0;
+    }
+    particles3Ready = true;
+  }
+
+  const DRIFT3 = 0.020, JITTER3 = 0.032, FRICTION3 = 0.90, SETTLE_EPS3 = 0.045;
+  const WAKE3_FRAMES = 75, WAKE3_NOISE = 0.016;
+  let wake3Counter = 0;
+
+  function stepParticles3D(){
+    for(let i=0;i<N_PARTICLES_3D;i++){
+      const x=px3[i], y=py3[i], z=pz3[i];
+      const amp = sampleTrilinear(field3, x, y, z);
+      pamp3[i] = amp;
+      const gx = sampleTrilinear(gx3arr, x, y, z);
+      const gy = sampleTrilinear(gy3arr, x, y, z);
+      const gz = sampleTrilinear(gz3arr, x, y, z);
+      let nvx = vx3[i]*FRICTION3 - gx*DRIFT3 + (Math.random()-0.5)*JITTER3*amp;
+      let nvy = vy3[i]*FRICTION3 - gy*DRIFT3 + (Math.random()-0.5)*JITTER3*amp;
+      let nvz = vz3[i]*FRICTION3 - gz*DRIFT3 + (Math.random()-0.5)*JITTER3*amp;
+      if(wake3Counter>0){
+        nvx += (Math.random()-0.5)*WAKE3_NOISE;
+        nvy += (Math.random()-0.5)*WAKE3_NOISE;
+        nvz += (Math.random()-0.5)*WAKE3_NOISE;
+      } else if(amp<SETTLE_EPS3){
+        nvx*=0.2; nvy*=0.2; nvz*=0.2;
+      }
+      const sp = Math.hypot(nvx,nvy,nvz), maxSp=0.05;
+      if(sp>maxSp){ nvx=nvx/sp*maxSp; nvy=nvy/sp*maxSp; nvz=nvz/sp*maxSp; }
+      vx3[i]=nvx; vy3[i]=nvy; vz3[i]=nvz;
+      let nx=x+nvx, ny=y+nvy, nz=z+nvz;
+      if(nx<0.02){ nx=0.02; vx3[i]*=-0.3; } if(nx>0.98){ nx=0.98; vx3[i]*=-0.3; }
+      if(ny<0.02){ ny=0.02; vy3[i]*=-0.3; } if(ny>0.98){ ny=0.98; vy3[i]*=-0.3; }
+      if(nz<0.02){ nz=0.02; vz3[i]*=-0.3; } if(nz>0.98){ nz=0.98; vz3[i]*=-0.3; }
+      px3[i]=nx; py3[i]=ny; pz3[i]=nz;
+    }
+  }
+
+  function initThree(){
+    if(three3) return;
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+    renderer.setClearColor(0x0d0e11, 1);
+    plate3dEl.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x0d0e11, 2.0, 4.8);
+
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 10);
+
+    scene.add(new THREE.AmbientLight(0x8a8d92, 0.55));
+    const key = new THREE.DirectionalLight(0xfff2dd, 0.9);
+    key.position.set(0.6, 1.5, 0.9);
+    scene.add(key);
+
+    // wireframe cube = the volume's boundary, so the cloud reads as filling a
+    // real 3D space rather than floating with no reference
+    const cubeEdges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1,1,1)),
+      new THREE.LineBasicMaterial({ color:0x3a3d42, transparent:true, opacity:0.55 })
+    );
+    scene.add(cubeEdges);
+
+    // faint floor, also doubles as the raycast target for tap-to-move-source
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(1,1),
+      new THREE.MeshBasicMaterial({ color:0x141518, transparent:true, opacity:0.4, side:THREE.DoubleSide })
+    );
+    floor.rotation.x = -Math.PI/2;
+    floor.position.y = -0.5;
+    scene.add(floor);
+
+    // the grain cloud itself: soft additive points filling the volume
+    const pgeo = new THREE.BufferGeometry();
+    pgeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N_PARTICLES_3D*3), 3));
+    pgeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N_PARTICLES_3D*3), 3));
+    const pmat = new THREE.PointsMaterial({
+      size: 0.021, map: makeGrainSprite(), vertexColors:true,
+      transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, sizeAttenuation:true
+    });
+    const points = new THREE.Points(pgeo, pmat);
+    scene.add(points);
+
+    // the surface graph: a height-map mesh over the *same* 2D field the flat
+    // canvas draws, so switching into this mode shows amp(x,y) as literal
+    // elevation instead of a flat grayscale/particle plot. Built once and
+    // reused - only vertex Y (height) and vertex color change per frame.
+    const surfGeo = new THREE.BufferGeometry();
+    surfGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(SURF_RES*SURF_RES*3), 3));
+    surfGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(SURF_RES*SURF_RES*3), 3));
+    surfGeo.setIndex(new THREE.BufferAttribute(surfIndex, 1));
+    const surfMat = new THREE.MeshStandardMaterial({
+      vertexColors:true, side:THREE.DoubleSide, roughness:0.65, metalness:0.06
+    });
+    const surfMesh = new THREE.Mesh(surfGeo, surfMat);
+    surfMesh.visible = false;
+    scene.add(surfMesh);
+
+    // faint amber grid overlay on top of the shaded surface - reads like an
+    // actual "surface graph" (gridlines over a plotted function) rather than
+    // just a lit blob of terrain.
+    const wireMesh = new THREE.Mesh(
+      surfGeo,
+      new THREE.MeshBasicMaterial({ color:0xffab3d, wireframe:true, transparent:true, opacity:0.10, depthWrite:false })
+    );
+    wireMesh.visible = false;
+    scene.add(wireMesh);
+
+    three3 = { renderer, scene, camera, points, pgeo, floor, cubeEdges, surfMesh, surfGeo, wireMesh };
+    updateCameraFromSpherical();
+  }
+
+  function updateSurfaceMesh(){
+    if(!three3) return;
+    const pos = three3.surfGeo.attributes.position;
+    const col = three3.surfGeo.attributes.color;
+    const rgb = [0,0,0];
+    let k = 0;
+    for(let j=0;j<SURF_RES;j++){
+      const v = j/(SURF_RES-1);
+      for(let i=0;i<SURF_RES;i++){
+        const u = i/(SURF_RES-1);
+        const amp = sampleBilinear(field, u, v);
+        // same (x,-z) plate mapping as the volume cloud; height (world Y)
+        // comes straight from the field amplitude instead of a particle's
+        // own drifted position.
+        pos.setXYZ(k, u-0.5, -0.5+amp*SURF_HEIGHT, -(v-0.5));
+        surfaceColor(amp, rgb);
+        col.setXYZ(k, rgb[0], rgb[1], rgb[2]);
+        k++;
+      }
+    }
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
+    three3.surfGeo.computeVertexNormals();
+  }
+
+  function updatePointsPositions(){
+    if(!three3) return;
+    const pos = three3.pgeo.attributes.position;
+    const col = three3.pgeo.attributes.color;
+    const rgb = [0,0,0];
+    for(let i=0;i<N_PARTICLES_3D;i++){
+      const amp = pamp3[i];
+      // pz3 (the field's own z-axis) is mapped to world-up, so the cloud
+      // genuinely fills height/width/depth instead of sitting on a floor
+      pos.setXYZ(i, px3[i]-0.5, pz3[i]-0.5, -(py3[i]-0.5));
+      ampColor(amp, rgb);
+      col.setXYZ(i, rgb[0], rgb[1], rgb[2]);
+    }
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
+  }
+
+  // simple manual orbit (spherical coords) - avoids pulling in the separate
+  // OrbitControls addon just for drag-to-rotate
+  let camTheta = Math.PI*0.28, camPhi = Math.PI*0.30, camRadius = 2.6;
+  let autoRotate = true;
+  function updateCameraFromSpherical(){
+    if(!three3) return;
+    const phi = Math.min(Math.max(camPhi, 0.18), Math.PI/2-0.04);
+    three3.camera.position.set(
+      camRadius*Math.sin(phi)*Math.sin(camTheta),
+      camRadius*Math.cos(phi),
+      camRadius*Math.sin(phi)*Math.cos(camTheta)
+    );
+    three3.camera.lookAt(0, 0, 0);
+  }
+
+  function resizeThree(){
+    if(!three3) return;
+    const s = wrap.clientWidth;
+    three3.renderer.setSize(s, s, false);
+    three3.camera.aspect = 1;
+    three3.camera.updateProjectionMatrix();
+  }
+
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  function raycastSetDrive(clientX, clientY){
+    const rect = plate3dEl.getBoundingClientRect();
+    ndc.x = ((clientX-rect.left)/rect.width)*2-1;
+    ndc.y = -((clientY-rect.top)/rect.height)*2+1;
+    raycaster.setFromCamera(ndc, three3.camera);
+    const target = viewMode==='surface' ? three3.surfMesh : three3.floor;
+    const hit = raycaster.intersectObject(target)[0];
+    if(!hit) return;
+    driveX = Math.min(Math.max(hit.point.x+0.5, 0.02), 0.98);
+    driveY = Math.min(Math.max(-hit.point.z+0.5, 0.02), 0.98);
+    computeField(); // recomputes both the 2D field and (via the hook inside it) the 3D field
+    wakeCounter = WAKE_FRAMES;
+    wake3Counter = WAKE3_FRAMES;
+  }
+
+  let dragging=false, dragMoved=false, lastPX=0, lastPY=0;
+  plate3dEl.addEventListener('pointerdown', (e)=>{
+    dragging = true; dragMoved = false;
+    lastPX = e.clientX; lastPY = e.clientY;
+    plate3dEl.setPointerCapture(e.pointerId);
+  });
+  plate3dEl.addEventListener('pointermove', (e)=>{
+    if(!dragging) return;
+    const dx = e.clientX-lastPX, dy = e.clientY-lastPY;
+    if(Math.abs(dx)+Math.abs(dy) > 3) dragMoved = true;
+    if(dragMoved){
+      camTheta -= dx*0.006;
+      camPhi   -= dy*0.006;
+      autoRotate = false;
+      updateCameraFromSpherical();
+    }
+    lastPX = e.clientX; lastPY = e.clientY;
+  });
+  function endDrag(e){
+    if(dragging && !dragMoved) raycastSetDrive(e.clientX, e.clientY);
+    dragging = false;
+  }
+  plate3dEl.addEventListener('pointerup', endDrag);
+  plate3dEl.addEventListener('pointercancel', ()=>{ dragging=false; });
+
+  function setViewMode(mode){
+    // mode is 'flat', 'volume', or 'surface'. Both 3D-ish modes share the same
+    // WebGL canvas/camera/orbit controls; only which objects are visible (and
+    // which field feeds them) changes.
+    viewMode = mode;
+    const is3DAny = mode==='volume' || mode==='surface';
+
+    if(is3DAny){
+      initThree();
+      resizeThree();
+      plate3dEl.classList.add('active');
+      canvas.classList.add('hidden3d');
+      hint.style.display = 'none';
+      readout.style.display = 'none';
+      orbitHint.classList.add('active');
+    } else {
+      plate3dEl.classList.remove('active');
+      canvas.classList.remove('hidden3d');
+      hint.style.display = '';
+      readout.style.display = '';
+      orbitHint.classList.remove('active');
+    }
+
+    if(mode==='volume'){
+      if(!particles3Ready) scatterParticles3D();
+      omega3 = sliderToOmega3(slider.value);
+      computeField3D();
+    } else if(mode==='surface'){
+      updateSurfaceMesh();
+    }
+
+    if(three3){
+      three3.points.visible = (mode==='volume');
+      three3.cubeEdges.visible = (mode==='volume');
+      three3.floor.visible = (mode==='volume');
+      three3.surfMesh.visible = (mode==='surface');
+      three3.wireMesh.visible = (mode==='surface');
+    }
+
+    orbitHint.textContent = mode==='surface'
+      ? 'drag to orbit · tap surface to move source'
+      : 'drag to orbit · tap floor to move source';
+
+    // Labels stay put (3D / SURF) so the pills never resize as you toggle them -
+    // only the active highlight moves. The title (tooltip) still spells out what
+    // the click will actually do, since "3D" alone doesn't say whether tapping
+    // it turns the view on or off.
+    mode3DBtn.classList.toggle('active', mode==='volume');
+    mode3DBtn.setAttribute('aria-pressed', String(mode==='volume'));
+    mode3DBtn.title = mode==='volume' ? 'Back to flat view' : 'Switch to 3D volumetric view';
+
+    modeSurfBtn.classList.toggle('active', mode==='surface');
+    modeSurfBtn.setAttribute('aria-pressed', String(mode==='surface'));
+    modeSurfBtn.title = mode==='surface' ? 'Back to flat view' : 'Switch to 3D surface graph';
+  }
+  mode3DBtn.addEventListener('click', ()=> setViewMode(viewMode==='volume' ? 'flat' : 'volume'));
+  modeSurfBtn.addEventListener('click', ()=> setViewMode(viewMode==='surface' ? 'flat' : 'surface'));
+
+  // ---------- controls ----------
+  const slider = document.getElementById('freqSlider');
+  const freqVal = document.getElementById('freqVal');
+  const readout = document.getElementById('readout');
+  const hint = document.getElementById('hint');
+  const ticksEl = document.getElementById('ticks');
+  const resetBtn = document.getElementById('resetBtn');
+  const teleMode = document.getElementById('teleMode');
+  const teleOmega = document.getElementById('teleOmega');
+  const teleZeta = document.getElementById('teleZeta');
+  const teleDrive = document.getElementById('teleDrive');
+
+  // slider -> omega is a direct linear map, no invented unit conversion:
+  // omega lives in the same natural-frequency units as w_mn = m^2+n^2.
+  function sliderToOmega(v){ return (v/1000)*OMEGA_LIN_MAX; }
+
+  function updateReadout(){
+    freqVal.textContent = 'Ω = ' + omega.toFixed(1);
+    readout.innerHTML =
+      `<span class="lab">NEAR MODE</span> (${dominantMode[0]}, ${dominantMode[1]})  w=${(dominantMode[0]*dominantMode[0]+dominantMode[1]*dominantMode[1])}<br>` +
+      `<span class="lab">ζ</span> ${ZETA}  <span class="lab">DRIVE</span> ${driveX.toFixed(2)}, ${driveY.toFixed(2)}`;
+    // Desktop sidebar duplicates the same state in a larger, dedicated panel -
+    // overlay text is deliberately small/unobtrusive on the plate itself, but on
+    // a big screen there's room for a properly legible instrument readout too.
+    teleMode.textContent = `(${dominantMode[0]}, ${dominantMode[1]})`;
+    teleOmega.textContent = omega.toFixed(1);
+    teleZeta.textContent = ZETA;
+    teleDrive.textContent = `${driveX.toFixed(2)}, ${driveY.toFixed(2)}`;
+  }
+
+  function buildTicks(){
+    // ticks mark exact resonances: omega = w_mn = m^2+n^2
+    // A native <input type=range> thumb's center travels from thumbRadius to
+    // (trackWidth - thumbRadius), never touching the true 0%/100% edges of the
+    // track. Positioning ticks with a plain percentage (v/10 + '%') ignored that,
+    // so ticks drifted away from where the thumb actually lands as you approach
+    // either end. Compute in pixels against the thumb's real travel range instead.
+    ticksEl.innerHTML = '';
+    const THUMB_RADIUS = 8; // matches the 16px thumb width in CSS
+    const trackWidth = ticksEl.clientWidth;
+    const travel = Math.max(trackWidth - THUMB_RADIUS*2, 0);
+    const seen = new Set();
+    for(let m=1;m<=M;m++){
+      for(let n=m;n<=M;n++){
+        const wmn = m*m+n*n;
+        if(wmn>OMEGA_LIN_MAX) continue;
+        const key = wmn.toFixed(1);
+        if(seen.has(key)) continue;
+        seen.add(key);
+        const v = (wmn/OMEGA_LIN_MAX)*1000;
+        if(v<0||v>1000) continue;
+        const t = document.createElement('div');
+        t.className = 'tick' + (m<=4 && n<=4 ? ' hot' : '');
+        t.style.left = (THUMB_RADIUS + (v/1000)*travel) + 'px';
+        ticksEl.appendChild(t);
+      }
+    }
+  }
+
+  let pendingRecompute = false;
+  function requestRecompute(){
+    if(pendingRecompute) return;
+    pendingRecompute = true;
+    requestAnimationFrame(()=>{
+      omega = sliderToOmega(slider.value);
+      omega3 = sliderToOmega3(slider.value);
+      computeField();
+      wakeCounter = WAKE_FRAMES;
+      wake3Counter = WAKE3_FRAMES;
+      pendingRecompute = false;
+    });
+  }
+
+  slider.addEventListener('input', requestRecompute);
+
+  // Explicit +/- stepper buttons: some pointing devices (trackpads, certain
+  // touchpads-as-mouse setups) make dragging a thin native slider thumb
+  // unreliable, so a click target that nudges the value is a needed fallback
+  // alongside drag/keyboard-arrow input.
+  const FREQ_STEP = 15;
+  function stepFreq(delta){
+    const v = Math.min(1000, Math.max(0, Number(slider.value) + delta));
+    slider.value = v;
+    requestRecompute();
+  }
+  function wireStepButton(btn, delta){
+    let repeatTimer = null, holdTimeout = null;
+    const stop = ()=>{
+      clearTimeout(holdTimeout); clearInterval(repeatTimer);
+      holdTimeout = null; repeatTimer = null;
+    };
+    btn.addEventListener('pointerdown', (e)=>{
+      e.preventDefault();
+      stepFreq(delta);
+      holdTimeout = setTimeout(()=>{
+        repeatTimer = setInterval(()=>stepFreq(delta), 70);
+      }, 380);
+    });
+    btn.addEventListener('pointerup', stop);
+    btn.addEventListener('pointerleave', stop);
+    btn.addEventListener('pointercancel', stop);
+  }
+  wireStepButton(document.getElementById('freqUp'), FREQ_STEP);
+  wireStepButton(document.getElementById('freqDown'), -FREQ_STEP);
+
+  resetBtn.addEventListener('click', ()=>{
+    // RESCATTER previously only reset the flat 2D grain field, so clicking it
+    // while in 3D mode silently did nothing to the volumetric cloud on screen.
+    if(viewMode==='volume'){
+      scatterParticles3D();
+      wake3Counter = WAKE3_FRAMES;
+    } else if(viewMode==='surface'){
+      // no particles to rescatter on a height-map graph - re-center the
+      // orbit camera instead, so the button still does something useful.
+      camTheta = Math.PI*0.28; camPhi = Math.PI*0.30; camRadius = 2.6;
+      autoRotate = true;
+      updateCameraFromSpherical();
+    } else {
+      scatterParticles();
+      hint.style.opacity = '1';
+    }
+  });
+
+  function pointerToPlate(clientX, clientY){
+    const rect = canvas.getBoundingClientRect();
+    let x = (clientX-rect.left)/rect.width;
+    let y = (clientY-rect.top)/rect.height;
+    x = Math.min(Math.max(x,0.02),0.98);
+    y = Math.min(Math.max(y,0.02),0.98);
+    return [x,y];
+  }
+
+  function setDrive(clientX, clientY){
+    const [x,y] = pointerToPlate(clientX, clientY);
+    driveX = x; driveY = y;
+    computeField();
+    wakeCounter = WAKE_FRAMES;
+    hint.style.opacity = '0';
+  }
+
+  canvas.addEventListener('pointerdown', (e)=>{
+    setDrive(e.clientX, e.clientY);
+  });
+
+  // ---------- main loop ----------
+  function loop(){
+    if(viewMode==='volume' && three3){
+      stepParticles3D();
+      if(wake3Counter>0) wake3Counter--;
+      updatePointsPositions();
+      if(autoRotate){ camTheta += 0.0018; updateCameraFromSpherical(); }
+      three3.renderer.render(three3.scene, three3.camera);
+    } else if(viewMode==='surface' && three3){
+      updateSurfaceMesh();
+      if(autoRotate){ camTheta += 0.0018; updateCameraFromSpherical(); }
+      three3.renderer.render(three3.scene, three3.camera);
+    } else {
+      stepParticles();
+      if(wakeCounter>0) wakeCounter--;
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- collapsible sidebar ----------
+  // Collapsing the sidebar changes #plateWrap's box size without ever firing a
+  // window 'resize' event, so the existing window-resize-only listener would
+  // leave the canvas at its old (smaller) pixel size even though its CSS box
+  // just grew - the plate would look blurry/cropped instead of actually
+  // getting bigger. A ResizeObserver on the wrapper catches that (and any
+  // other future layout-driven size change) in addition to real window
+  // resizes, so "big display" mode really does render at full resolution.
+  const appEl = document.getElementById('app');
+  const layoutEl = document.getElementById('layout');
+  const panelToggle = document.getElementById('panelToggle');
+  const panelToggleIcon = document.getElementById('panelToggleIcon');
+  let sidebarCollapsed = false;
+
+  function setSidebarCollapsed(collapsed){
+    sidebarCollapsed = collapsed;
+    layoutEl.classList.toggle('sidebar-collapsed', collapsed);
+    appEl.classList.toggle('sidebar-collapsed', collapsed);
+    panelToggle.setAttribute('aria-expanded', String(!collapsed));
+    panelToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    panelToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    panelToggleIcon.innerHTML = collapsed ? '&#8249;' : '&#8250;';
+  }
+  panelToggle.addEventListener('click', ()=> setSidebarCollapsed(!sidebarCollapsed));
+
+  if('ResizeObserver' in window){
+    let roFrame = null;
+    const ro = new ResizeObserver(()=>{
+      if(roFrame) return;
+      roFrame = requestAnimationFrame(()=>{ roFrame=null; resize(); });
+    });
+    ro.observe(wrap);
+  }
+
+  resize();
+  buildTicks();
+  omega = sliderToOmega(slider.value);
+  computeField();
+  loop();
+})();
+</script>
+</body>
+</html>

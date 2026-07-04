@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chladni Plate — sound made visible</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0a0a0c;
+    --panel: #131417;
+    --panel-line: #232529;
+    --metal-hi: #4a4d52;
+    --metal-lo: #17181b;
+    --sand: #e4dcc4;
+    --amber: #ffab3d;
+    --amber-dim: #7a5321;
+    --ink-dim: #8b8d92;
+    --ink: #e8e8ea;
+  }
+  *{ box-sizing:border-box; }
+  html{ scroll-behavior:smooth; }
+  body{
+    margin:0; background: var(--bg); color: var(--ink);
+    font-family:'Space Grotesk', sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{ color:inherit; }
+  .wrap{ max-width:1180px; margin:0 auto; padding:0 28px; }
+  .eyebrow{
+    font-family:'JetBrains Mono', monospace;
+    font-size:10.5px; letter-spacing:0.16em; font-weight:600;
+    color: var(--amber); opacity:0.9; margin:0 0 14px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .eyebrow::before{
+    content:''; width:5px; height:5px; border-radius:50%;
+    background: var(--amber); box-shadow:0 0 6px var(--amber);
+    flex:none;
+  }
+  h1,h2{ margin:0; font-weight:700; letter-spacing:-0.01em; }
+  p{ margin:0; }
+
+  /* ---------- reveal-on-scroll (respects reduced motion) ---------- */
+  .reveal{ opacity:0; transform: translateY(18px); transition: opacity 0.7s ease, transform 0.7s ease; }
+  .reveal.visible{ opacity:1; transform:none; }
+  @media (prefers-reduced-motion: reduce){
+    html{ scroll-behavior:auto; }
+    .reveal{ opacity:1; transform:none; transition:none; }
+  }
+
+  /* ---------- nav ---------- */
+  header.nav{
+    position:sticky; top:0; z-index:20;
+    background: rgba(10,10,12,0.78); backdrop-filter: blur(10px);
+    border-bottom:1px solid var(--panel-line);
+  }
+  header.nav .wrap{
+    display:flex; align-items:center; justify-content:space-between;
+    padding-top:16px; padding-bottom:16px;
+  }
+  .logo{
+    font-size:14px; font-weight:700; letter-spacing:0.1em;
+  }
+  .logo span{ color: var(--amber); }
+  .nav-cta{
+    font-family:'JetBrains Mono', monospace;
+    font-size:10.5px; letter-spacing:0.08em; font-weight:600;
+    color: var(--ink-dim); text-decoration:none;
+    border:1px solid var(--panel-line); border-radius:20px;
+    padding:8px 16px; transition: color 0.15s, border-color 0.15s;
+    white-space:nowrap;
+  }
+  .nav-cta:hover, .nav-cta:focus-visible{ color: var(--amber); border-color: var(--amber-dim); }
+
+  /* ---------- hero ---------- */
+  .hero{
+    padding: 68px 0 84px;
+    display:grid; grid-template-columns: 1fr; gap:44px;
+  }
+  .hero h1{
+    font-size: clamp(38px, 6vw, 68px);
+    line-height:1.03;
+    max-width:12ch;
+  }
+  .hero .lede{
+    margin-top:20px; max-width:46ch;
+    font-size:16px; line-height:1.6; color: var(--ink-dim);
+  }
+  .cta{
+    display:inline-flex; align-items:center; gap:8px;
+    margin-top:32px;
+    font-family:'JetBrains Mono', monospace;
+    font-size:12px; letter-spacing:0.06em; font-weight:600;
+    text-decoration:none; color:#0a0a0c;
+    background: linear-gradient(180deg, #ffc370, var(--amber));
+    border-radius:8px; padding:14px 22px;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.15) inset, 0 10px 30px -12px rgba(255,171,61,0.5);
+    transition: transform 0.15s ease, box-shadow 0.2s ease;
+  }
+  .cta:hover, .cta:focus-visible{ transform: translateY(-1px); box-shadow: 0 0 0 1px rgba(0,0,0,0.15) inset, 0 14px 34px -10px rgba(255,171,61,0.65); }
+  .cta:active{ transform: translateY(0px); }
+
+  .hero-stage{ width:100%; }
+  .plate-frame{
+    position:relative;
+    width:100%; max-width:520px; margin:0 auto;
+    aspect-ratio:1/1;
+    border-radius:8px;
+    box-shadow: 0 0 0 1px #2b2d31, 0 30px 80px -30px rgba(0,0,0,0.85), 0 0 120px -40px rgba(255,171,61,0.12);
+  }
+  #heroCanvas{ display:block; width:100%; height:100%; border-radius:8px; }
+  .corner{ position:absolute; width:10px; height:10px; border:1.5px solid rgba(255,171,61,0.5); pointer-events:none; }
+  .c-tl{ top:7px; left:7px; border-right:none; border-bottom:none; }
+  .c-tr{ top:7px; right:7px; border-left:none; border-bottom:none; }
+  .c-bl{ bottom:7px; left:7px; border-right:none; border-top:none; }
+  .c-br{ bottom:7px; right:7px; border-left:none; border-top:none; }
+
+  .telemetry-strip{
+    max-width:520px; margin:16px auto 0;
+    display:flex; justify-content:space-between;
+    font-family:'JetBrains Mono', monospace;
+    border-top:1px dashed var(--panel-line); padding-top:14px;
+  }
+  .telemetry-strip div{ display:flex; flex-direction:column; gap:4px; }
+  .telemetry-strip b{ font-size:15px; color: var(--ink); font-weight:600; }
+  .telemetry-strip label{ font-size:9px; letter-spacing:0.1em; color: var(--amber); opacity:0.85; }
+
+  @media (min-width: 860px){
+    .hero{ grid-template-columns: 1.05fr 0.95fr; align-items:center; gap:56px; }
+    .hero-stage{ order:2; }
+  }
+
+  /* ---------- section shell ---------- */
+  section{ padding:88px 0; border-top:1px solid var(--panel-line); }
+  section h2{ font-size: clamp(24px, 3.4vw, 34px); max-width:18ch; margin-bottom:40px; }
+
+  /* ---------- mechanism ---------- */
+  .mech-grid{ display:grid; grid-template-columns:1fr; gap:18px; }
+  @media (min-width:760px){ .mech-grid{ grid-template-columns:repeat(3,1fr); } }
+  .mech-card{
+    background: var(--panel); border:1px solid var(--panel-line); border-radius:10px;
+    padding:26px 24px;
+  }
+  .mech-card .tag{
+    display:inline-block; font-family:'JetBrains Mono', monospace;
+    font-size:10px; letter-spacing:0.1em; font-weight:600;
+    color: var(--amber); border:1px solid var(--amber-dim);
+    border-radius:20px; padding:5px 12px; margin-bottom:16px;
+  }
+  .mech-card p{ font-size:14.5px; line-height:1.65; color: var(--ink-dim); }
+
+  /* ---------- gallery ---------- */
+  .gallery-grid{
+    display:grid; grid-template-columns:repeat(2,1fr); gap:14px;
+  }
+  @media (min-width:640px){ .gallery-grid{ grid-template-columns:repeat(3,1fr); } }
+  @media (min-width:980px){ .gallery-grid{ grid-template-columns:repeat(6,1fr); } }
+  .mode-card{
+    background: var(--panel); border:1px solid var(--panel-line); border-radius:10px;
+    padding:10px; text-align:center;
+  }
+  .mode-card canvas{
+    width:100%; aspect-ratio:1/1; border-radius:6px; display:block;
+    background: #141518;
+  }
+  .mode-card .cap{
+    margin-top:10px; font-family:'JetBrains Mono', monospace;
+    font-size:10.5px; color: var(--ink-dim); letter-spacing:0.02em;
+  }
+  .mode-card .cap b{ color: var(--amber); font-weight:600; }
+
+  /* ---------- physics ---------- */
+  .eq-card{
+    background: var(--panel); border:1px solid var(--panel-line); border-radius:12px;
+    padding:34px 30px; display:grid; gap:22px;
+  }
+  @media (min-width:760px){ .eq-card{ grid-template-columns:0.85fr 1.15fr; align-items:center; padding:40px; } }
+  .eq{
+    font-family:'JetBrains Mono', monospace;
+    font-size: clamp(18px, 2.6vw, 24px);
+    color: var(--sand); letter-spacing:0.01em;
+    border-left:2px solid var(--amber-dim); padding-left:18px;
+  }
+  .eq-card p{ font-size:14.5px; line-height:1.7; color: var(--ink-dim); }
+  .eq-card p + p{ margin-top:14px; }
+
+  /* ---------- footer ---------- */
+  footer{
+    border-top:1px solid var(--panel-line);
+    padding:40px 0 60px;
+    display:flex; flex-wrap:wrap; gap:16px;
+    align-items:center; justify-content:space-between;
+  }
+  footer .fine{
+    font-family:'JetBrains Mono', monospace; font-size:11px;
+    color: var(--ink-dim); max-width:52ch; line-height:1.6;
+  }
+  footer .fine b{ color: var(--ink); }
+
+  :focus-visible{ outline: 1.5px solid var(--amber); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <div class="logo">CHLADNI<span>·</span>PLATE</div>
+    <a class="nav-cta" href="simulation.html">OPEN THE PLATE</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">FORCED MODAL RESPONSE</p>
+      <h1>Sound made visible.</h1>
+      <p class="lede">Tap a steel plate and it just makes noise. Tap it at exactly the right frequency, and the sand across the surface stops moving entirely — but only along razor-thin lines. This is that plate, rebuilt as an instrument you can play.</p>
+      <a class="cta" href="simulation.html">Open the plate →</a>
+    </div>
+    <div class="hero-stage">
+      <div class="plate-frame">
+        <canvas id="heroCanvas"></canvas>
+        <div class="corner c-tl"></div><div class="corner c-tr"></div>
+        <div class="corner c-bl"></div><div class="corner c-br"></div>
+      </div>
+      <div class="telemetry-strip">
+        <div><b id="teleOmega">—</b><label>Ω DRIVE</label></div>
+        <div><b id="teleMode">—</b><label>NEAR MODE</label></div>
+        <div><b>0.008</b><label>ζ DAMPING</label></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="mechanism reveal">
+    <p class="eyebrow">THE MECHANISM</p>
+    <h2>How a flat plate learns to hold still</h2>
+    <div class="mech-grid">
+      <div class="mech-card">
+        <span class="tag">DRIVE</span>
+        <p>A single point pushes energy into the plate at a chosen frequency, Ω. Off-resonance, that energy barely raises a ripple — most of it never leaves the point it entered at.</p>
+      </div>
+      <div class="mech-card">
+        <span class="tag">DAMPING · ζ</span>
+        <p>Friction bleeds energy back out at every instant. Only the modes whose natural frequency sits close to Ω win that trade and build any real amplitude.</p>
+      </div>
+      <div class="mech-card">
+        <span class="tag">NODAL LINES</span>
+        <p>Everywhere the plate still moves, sand gets agitated and drifts down the amplitude gradient — until it runs out of slope, exactly on the lines that never move at all.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="gallery reveal">
+    <p class="eyebrow">FREQUENCY GALLERY</p>
+    <h2>Six ways a square can stand still</h2>
+    <div class="gallery-grid" id="galleryGrid"></div>
+  </section>
+
+  <section class="physics reveal">
+    <p class="eyebrow">THE PHYSICS</p>
+    <h2>A plate rings differently than a string</h2>
+    <div class="eq-card">
+      <div class="eq">D&nabla;&#8308;w&nbsp;+&nbsp;&rho;h&#8202;<span style="text-decoration:overline">w</span>&nbsp;=&nbsp;f(x,y,t)</div>
+      <div>
+        <p>Every mode of a simply-supported square plate is a standing wave, sin(m&pi;x)&nbsp;sin(n&pi;y), with a natural frequency set by &omega;<sub>mn</sub> &prop; (m&sup2;+n&sup2;) — the biharmonic operator, not the ordinary wave equation. That's why a plate's overtones don't line up in the neat harmonic ratios a string's do.</p>
+        <p>Force the plate at frequency &Omega; and each mode behaves like its own damped oscillator. Sum enough of them, symmetrized around the plate's own geometry, and you get the exact field pushing sand toward the lines above.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <p class="fine"><b>Chladni Plate</b> is a study of forced modal response on a simply-supported plate. No two plates ring quite the same.</p>
+  <a class="nav-cta" href="simulation.html">OPEN THE PLATE →</a>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const sandRGB = [228,220,196], amberRGB = [255,171,61], darkRGB = [20,21,24];
+
+  // =========================================================
+  // Scroll reveal
+  // =========================================================
+  if('IntersectionObserver' in window && !REDUCED_MOTION){
+    const io = new IntersectionObserver((entries)=>{
+      entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('visible'); io.unobserve(e.target); } });
+    }, { threshold:0.15 });
+    document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+  } else {
+    document.querySelectorAll('.reveal').forEach(el=>el.classList.add('visible'));
+  }
+
+  // =========================================================
+  // Hero: a live, lower-res version of the plate's own physics,
+  // auto-cycling through a handful of resonant modes.
+  // =========================================================
+  const M = 14, GRID = 84, N_PARTICLES = 7000, ZETA = 0.008;
+  const canvas = document.getElementById('heroCanvas');
+  const ctx = canvas.getContext('2d', { alpha:false });
+  let cssSize = 0, dpr = Math.min(window.devicePixelRatio||1, 2);
+  let plateSprite = null;
+
+  function buildSprite(){
+    const s = document.createElement('canvas');
+    s.width = canvas.width; s.height = canvas.height;
+    const sc = s.getContext('2d'); sc.setTransform(dpr,0,0,dpr,0,0);
+    const g = sc.createRadialGradient(cssSize*0.5,cssSize*0.42,cssSize*0.05, cssSize*0.5,cssSize*0.5,cssSize*0.75);
+    g.addColorStop(0,'#4c4f54'); g.addColorStop(0.45,'#303237'); g.addColorStop(1,'#131417');
+    sc.fillStyle = g; sc.fillRect(0,0,cssSize,cssSize);
+    sc.globalAlpha = 0.05; sc.strokeStyle = '#ffffff';
+    for(let i=0;i<90;i++){
+      const y = Math.random()*cssSize;
+      sc.lineWidth = Math.random()*0.8;
+      sc.beginPath(); sc.moveTo(0,y); sc.lineTo(cssSize, y+(Math.random()-0.5)*6); sc.stroke();
+    }
+    // fine brushed-metal speckle grain, denser and finer than the coarse
+    // horizontal streaks above, so the bare plate itself reads as textured
+    // metal rather than a flat gradient before any sand settles on it.
+    const grainCount = Math.round(cssSize*cssSize*0.15);
+    for(let i=0;i<grainCount;i++){
+      const gx = Math.random()*cssSize, gy = Math.random()*cssSize;
+      const bright = Math.random();
+      sc.globalAlpha = 0.025 + bright*0.05;
+      sc.fillStyle = bright>0.5 ? '#ffffff' : '#000000';
+      sc.fillRect(gx, gy, 0.7, 0.7);
+    }
+    sc.globalAlpha = 1;
+    const vg = sc.createRadialGradient(cssSize*0.5,cssSize*0.5,cssSize*0.35, cssSize*0.5,cssSize*0.5,cssSize*0.72);
+    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.55)');
+    sc.fillStyle = vg; sc.fillRect(0,0,cssSize,cssSize);
+    plateSprite = s;
+  }
+
+  function resizeHero(){
+    cssSize = Math.max(1, Math.floor(canvas.parentElement.clientWidth));
+    canvas.width = Math.round(cssSize*dpr); canvas.height = Math.round(cssSize*dpr);
+    canvas.style.width = cssSize+'px'; canvas.style.height = cssSize+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    buildSprite();
+  }
+  window.addEventListener('resize', resizeHero);
+
+  const sinX = new Float32Array(M*GRID), sinY = new Float32Array(M*GRID);
+  for(let m=1;m<=M;m++) for(let i=0;i<GRID;i++){
+    const v = Math.sin(m*Math.PI*(i+0.5)/GRID);
+    sinX[(m-1)*GRID+i]=v; sinY[(m-1)*GRID+i]=v;
+  }
+  const weightRe = new Float32Array(M*M), weightIm = new Float32Array(M*M);
+  const field = new Float32Array(GRID*GRID), gradXArr = new Float32Array(GRID*GRID), gradYArr = new Float32Array(GRID*GRID);
+  let driveX=0.5, driveY=0.5, omega=0, dominantMode=[1,1];
+
+  function d4Orbit(x0,y0,ox,oy){
+    ox[0]=x0; oy[0]=y0; ox[1]=y0; oy[1]=1-x0; ox[2]=1-x0; oy[2]=1-y0; ox[3]=1-y0; oy[3]=x0;
+    ox[4]=y0; oy[4]=x0; ox[5]=1-x0; oy[5]=y0; ox[6]=1-y0; oy[6]=1-x0; ox[7]=x0; oy[7]=1-y0;
+  }
+  const orbX = new Float64Array(8), orbY = new Float64Array(8);
+
+  // Every mode of a simply-supported plate is forced to zero all along the
+  // outer edge (sin(m*pi*0)=sin(m*pi*1)=0 for every m,n) - so the frame itself
+  // is technically a node for every single mode, competing with the thin
+  // interior nodal lines that are the actual, mode-specific pattern. Left
+  // alone, that turns the perimeter into one wide attractor and almost all
+  // sand just piles up along the four edges instead of on the interior lines,
+  // which is what made the plate look like scattered edge-dust rather than a
+  // proper symmetric figure. Raising the floor near (but not at) the edge
+  // gives particles somewhere better to go without erasing modes - like (1,1)
+  // - whose only real nodal line is the border itself.
+  const EDGE_MARGIN = 0.05, EDGE_FLOOR = 0.15;
+  const edgeFloorArr = new Float32Array(GRID*GRID);
+  for(let iy=0;iy<GRID;iy++) for(let ix=0;ix<GRID;ix++){
+    const x=(ix+0.5)/GRID, y=(iy+0.5)/GRID;
+    const d = Math.min(x,1-x,y,1-y);
+    const t = d>=EDGE_MARGIN ? 0 : 1-d/EDGE_MARGIN;
+    edgeFloorArr[iy*GRID+ix] = EDGE_FLOOR*t*t;
+  }
+
+  function computeField(){
+    d4Orbit(driveX,driveY,orbX,orbY);
+    let bestScore=-1;
+    for(let m=1;m<=M;m++) for(let n=1;n<=M;n++){
+      let phi0=0;
+      for(let k=0;k<8;k++) phi0 += Math.sin(m*Math.PI*orbX[k])*Math.sin(n*Math.PI*orbY[k]);
+      const wmn=m*m+n*n, wmn2=wmn*wmn;
+      const dre=wmn2-omega*omega, dim=-2*ZETA*wmn*omega, mag2=dre*dre+dim*dim;
+      const idx=(m-1)*M+(n-1);
+      weightRe[idx]=(phi0*dre)/mag2; weightIm[idx]=(phi0*-dim)/mag2;
+      const score = Math.abs(phi0)/(Math.abs(wmn-omega)+0.6);
+      if(score>bestScore){ bestScore=score; dominantMode=[m,n]; }
+    }
+    let maxAmp=1e-6;
+    for(let iy=0;iy<GRID;iy++) for(let ix=0;ix<GRID;ix++){
+      let re=0,im=0;
+      for(let m=1;m<=M;m++){
+        const sx=sinX[(m-1)*GRID+ix]; if(sx===0) continue;
+        const base=(m-1)*M;
+        for(let n=1;n<=M;n++){
+          const w=sx*sinY[(n-1)*GRID+iy], idx=base+(n-1);
+          re+=w*weightRe[idx]; im+=w*weightIm[idx];
+        }
+      }
+      const amp=Math.sqrt(re*re+im*im); field[iy*GRID+ix]=amp; if(amp>maxAmp) maxAmp=amp;
+    }
+    for(let i=0;i<GRID*GRID;i++){
+      field[i]/=maxAmp;
+      if(field[i]<edgeFloorArr[i]) field[i]=edgeFloorArr[i];
+    }
+    for(let iy=0;iy<GRID;iy++) for(let ix=0;ix<GRID;ix++){
+      const xm=ix>0?field[iy*GRID+ix-1]:field[iy*GRID+ix];
+      const xp=ix<GRID-1?field[iy*GRID+ix+1]:field[iy*GRID+ix];
+      const ym=iy>0?field[(iy-1)*GRID+ix]:field[iy*GRID+ix];
+      const yp=iy<GRID-1?field[(iy+1)*GRID+ix]:field[iy*GRID+ix];
+      gradXArr[iy*GRID+ix]=(xp-xm)*0.5*GRID; gradYArr[iy*GRID+ix]=(yp-ym)*0.5*GRID;
+    }
+    document.getElementById('teleOmega').textContent = omega.toFixed(1);
+    document.getElementById('teleMode').textContent = `(${dominantMode[0]}, ${dominantMode[1]})`;
+  }
+
+  function sampleBilinear(arr,x,y){
+    const gx=Math.min(Math.max(x,0),0.9999)*(GRID-1), gy=Math.min(Math.max(y,0),0.9999)*(GRID-1);
+    const ix=gx|0, iy=gy|0, fx=gx-ix, fy=gy-iy;
+    const ix1=Math.min(ix+1,GRID-1), iy1=Math.min(iy+1,GRID-1);
+    const a=arr[iy*GRID+ix], b=arr[iy*GRID+ix1], c=arr[iy1*GRID+ix], d=arr[iy1*GRID+ix1];
+    return (a*(1-fx)+b*fx)*(1-fy)+(c*(1-fx)+d*fx)*fy;
+  }
+
+  const px=new Float32Array(N_PARTICLES), py=new Float32Array(N_PARTICLES);
+  const vx=new Float32Array(N_PARTICLES), vy=new Float32Array(N_PARTICLES), pamp=new Float32Array(N_PARTICLES);
+  function scatter(){ for(let i=0;i<N_PARTICLES;i++){ px[i]=0.03+Math.random()*0.94; py[i]=0.03+Math.random()*0.94; vx[i]=0; vy[i]=0; pamp[i]=0; } }
+  scatter();
+
+  const DRIFT=0.017, JITTER=0.03, FRICTION=0.9, SETTLE_EPS=0.01, WAKE_FRAMES=75, WAKE_NOISE=0.012;
+  let wakeCounter=WAKE_FRAMES;
+
+  function stepParticles(){
+    for(let i=0;i<N_PARTICLES;i++){
+      const x=px[i], y=py[i], amp=sampleBilinear(field,x,y); pamp[i]=amp;
+      const gx=sampleBilinear(gradXArr,x,y), gy=sampleBilinear(gradYArr,x,y);
+      let nvx=vx[i]*FRICTION-gx*DRIFT+(Math.random()-0.5)*JITTER*amp;
+      let nvy=vy[i]*FRICTION-gy*DRIFT+(Math.random()-0.5)*JITTER*amp;
+      if(wakeCounter>0){ nvx+=(Math.random()-0.5)*WAKE_NOISE; nvy+=(Math.random()-0.5)*WAKE_NOISE; }
+      else if(amp<SETTLE_EPS){ nvx*=0.18; nvy*=0.18; }
+      const sp=Math.hypot(nvx,nvy), maxSp=0.05;
+      if(sp>maxSp){ nvx=nvx/sp*maxSp; nvy=nvy/sp*maxSp; }
+      vx[i]=nvx; vy[i]=nvy;
+      let nx=x+nvx, ny=y+nvy;
+      if(nx<0.01){ nx=0.01; vx[i]*=-0.3; } if(nx>0.99){ nx=0.99; vx[i]*=-0.3; }
+      if(ny<0.01){ ny=0.01; vy[i]*=-0.3; } if(ny>0.99){ ny=0.99; vy[i]*=-0.3; }
+      px[i]=nx; py[i]=ny;
+    }
+  }
+
+  function draw(){
+    ctx.drawImage(plateSprite,0,0,cssSize,cssSize);
+    ctx.globalCompositeOperation='lighter';
+    for(let i=0;i<N_PARTICLES;i++){
+      const a=pamp[i], t=Math.min(a*2.2,1);
+      const r=sandRGB[0]+(amberRGB[0]-sandRGB[0])*t, g=sandRGB[1]+(amberRGB[1]-sandRGB[1])*t, b=sandRGB[2]+(amberRGB[2]-sandRGB[2])*t;
+      const alpha=0.22+0.5*(1-t*0.55), x=px[i]*cssSize, y=py[i]*cssSize;
+      if(a>0.4){
+        const glowA=Math.min((a-0.4)*0.55,0.22);
+        ctx.beginPath(); ctx.arc(x,y,2.4+t*1.6,0,Math.PI*2);
+        ctx.fillStyle=`rgba(255,171,61,${glowA})`; ctx.fill();
+      }
+      ctx.beginPath(); ctx.arc(x,y,0.55+t*0.32,0,Math.PI*2);
+      ctx.fillStyle=`rgba(${r|0},${g|0},${b|0},${alpha})`; ctx.fill();
+    }
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  // curated resonances to cycle through - real (m,n) pairs, not decoration.
+  // (1,1) is deliberately NOT first: its only nodal line is the plate's own
+  // outer border, so it has no interior figure at all - sand just drifts
+  // into the corners, which reads as a smudge, not a Chladni pattern. Modes
+  // with an interior grid (like (3,2)/(4,3)) go first so the very first
+  // frame is a recognizable, symmetric flower/rosette figure.
+  const TARGETS = [[3,2],[4,3],[2,2],[1,3],[2,1],[3,4],[1,1]];
+  let targetIdx = 0;
+  function nextTarget(skipWake){
+    const [m,n] = TARGETS[targetIdx % TARGETS.length]; targetIdx++;
+    driveX = 0.28+Math.random()*0.44; driveY = 0.28+Math.random()*0.44;
+    omega = m*m+n*n;
+    computeField();
+    wakeCounter = skipWake ? 0 : WAKE_FRAMES;
+  }
+
+  resizeHero();
+  // First target loads with wake noise skipped, then we fast-forward the
+  // particle sim synchronously (off-screen, before the first paint) so the
+  // hero's very first visible frame is already the resolved, symmetric
+  // nodal figure - not a field of undifferentiated scattered dust that
+  // takes ~a second of visible drift to resolve into a pattern.
+  nextTarget(true);
+  for(let i=0;i<260;i++) stepParticles();
+  draw();
+
+  if(!REDUCED_MOTION){
+    setInterval(nextTarget, 4400);
+    (function loop(){ stepParticles(); if(wakeCounter>0) wakeCounter--; draw(); requestAnimationFrame(loop); })();
+  }
+  // reduced-motion: pattern is already settled and painted above; no
+  // further animation runs, so nothing more to do here.
+
+  // =========================================================
+  // Gallery: driven-response nodal patterns, built the same
+  // D4-symmetrized way as the live plate above - NOT a bare
+  // sin(m*pi*x)*sin(n*pi*y) snapshot of a single eigenmode.
+  //
+  // BUG this replaces: a single (m,n) eigenmode is generically
+  // asymmetric whenever m != n (it's just a grid of m-1 by n-1
+  // rectangles), because (m,n) and (n,m) are DEGENERATE modes on
+  // a square plate - a real point drive always excites that whole
+  // family together, which is what actually produces the clean,
+  // symmetric figures Chladni plates are known for. Driving at
+  // omega = m^2+n^2 and summing every mode's response - each
+  // weighted by its own D4-symmetrized coupling to the drive point,
+  // exactly like computeField() above - reproduces that correctly.
+  // The result is invariant under the square's full symmetry group
+  // regardless of where the (arbitrary) drive point is placed.
+  // =========================================================
+  const GALLERY_MODES = [[1,1],[2,1],[2,2],[3,1],[3,2],[4,3]];
+  const grid = document.getElementById('galleryGrid');
+  const RES = 130;
+  const GM = 10; // modes summed per axis - plenty for these low targets
+  const gWeightRe = new Float32Array(GM*GM), gWeightIm = new Float32Array(GM*GM);
+  const gSinX = new Float32Array(GM*RES), gSinY = new Float32Array(GM*RES);
+  for(let m=1;m<=GM;m++) for(let i=0;i<RES;i++){
+    const v = Math.sin(m*Math.PI*(i+0.5)/RES);
+    gSinX[(m-1)*RES+i]=v; gSinY[(m-1)*RES+i]=v;
+  }
+
+  function galleryField(targetM, targetN){
+    // any generic (non-axis, non-diagonal) drive point works - the D4 sum
+    // below erases its specific location from the final symmetric result.
+    d4Orbit(0.37, 0.19, orbX, orbY);
+    const omega = targetM*targetM + targetN*targetN;
+    for(let m=1;m<=GM;m++){
+      for(let n=1;n<=GM;n++){
+        let phi0=0;
+        for(let k=0;k<8;k++) phi0 += Math.sin(m*Math.PI*orbX[k])*Math.sin(n*Math.PI*orbY[k]);
+        const wmn=m*m+n*n, wmn2=wmn*wmn;
+        const dre=wmn2-omega*omega, dim=-2*ZETA*wmn*omega, mag2=dre*dre+dim*dim;
+        const idx=(m-1)*GM+(n-1);
+        gWeightRe[idx]=(phi0*dre)/mag2; gWeightIm[idx]=(phi0*-dim)/mag2;
+      }
+    }
+    const field = new Float32Array(RES*RES);
+    let maxAmp=1e-6;
+    for(let iy=0; iy<RES; iy++){
+      for(let ix=0; ix<RES; ix++){
+        let re=0, im=0;
+        for(let m=1;m<=GM;m++){
+          const sx=gSinX[(m-1)*RES+ix]; if(sx===0) continue;
+          const base=(m-1)*GM;
+          for(let n=1;n<=GM;n++){
+            const w=sx*gSinY[(n-1)*RES+iy], idx=base+(n-1);
+            re+=w*gWeightRe[idx]; im+=w*gWeightIm[idx];
+          }
+        }
+        const amp=Math.sqrt(re*re+im*im);
+        field[iy*RES+ix]=amp; if(amp>maxAmp) maxAmp=amp;
+      }
+    }
+    for(let i=0;i<RES*RES;i++) field[i]/=maxAmp;
+    // Same edge-node issue as the hero plate: every mode is pinned to zero
+    // along the full perimeter, which without correction renders as a bright
+    // frame around every thumbnail and buries the mode-specific interior
+    // lines these cards are meant to show.
+    for(let iy=0;iy<RES;iy++) for(let ix=0;ix<RES;ix++){
+      const x=(ix+0.5)/RES, y=(iy+0.5)/RES;
+      const d = Math.min(x,1-x,y,1-y);
+      const t = d>=EDGE_MARGIN ? 0 : 1-d/EDGE_MARGIN;
+      const floor = EDGE_FLOOR*t*t, i=iy*RES+ix;
+      if(field[i]<floor) field[i]=floor;
+    }
+    return field;
+  }
+
+  GALLERY_MODES.forEach(([m,n])=>{
+    const card = document.createElement('div'); card.className='mode-card';
+    const cv = document.createElement('canvas'); cv.width=RES; cv.height=RES;
+    card.appendChild(cv);
+    const cap = document.createElement('div'); cap.className='cap';
+    cap.innerHTML = `<b>(${m}, ${n})</b> &middot; &Omega;=${m*m+n*n}`;
+    card.appendChild(cap);
+    grid.appendChild(card);
+
+    const gctx = cv.getContext('2d');
+    const img = gctx.createImageData(RES,RES);
+    const SHARP = 6.5;
+    const field = galleryField(m,n);
+    for(let iy=0; iy<RES; iy++){
+      for(let ix=0; ix<RES; ix++){
+        const amp = field[iy*RES+ix];
+        const inten = Math.exp(-Math.pow(amp*SHARP,2));
+        const idx=(iy*RES+ix)*4;
+        img.data[idx]   = darkRGB[0]+(sandRGB[0]-darkRGB[0])*inten;
+        img.data[idx+1] = darkRGB[1]+(sandRGB[1]-darkRGB[1])*inten;
+        img.data[idx+2] = darkRGB[2]+(sandRGB[2]-darkRGB[2])*inten;
+        img.data[idx+3] = 255;
+      }
+    }
+    gctx.putImageData(img,0,0);
+  });
+})();
+</script>
+</body>
+</html>
